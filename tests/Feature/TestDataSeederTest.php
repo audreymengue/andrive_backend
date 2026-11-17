@@ -59,7 +59,7 @@ class TestDataSeederTest extends TestCase
         $this->assertTrue(Hash::check('TestPass1!', User::query()->where('email', 'admin-test@aninf.ga')->value('password')));
 
         $this->assertSame(2, Role::query()->count());
-        $this->assertSame(59, Permission::query()->count());
+        $this->assertSame(67, Permission::query()->count());
         $this->assertTrue(User::query()->where('email', 'admin-test@aninf.ga')->firstOrFail()->hasRole('super_admin'));
         $this->assertTrue(User::query()->where('email', 'demandeur1@aninf.ga')->firstOrFail()->hasRole('demandeur'));
         $this->assertSame([

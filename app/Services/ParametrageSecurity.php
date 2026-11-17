@@ -2,13 +2,17 @@
 
 namespace App\Services;
 
+use App\Http\Resources\ParamLieuResource;
+use App\Http\Resources\ParamTypeSortieResource;
 use App\Http\Resources\PermissionResource;
 use App\Http\Resources\RoleResource;
 use App\Http\Resources\UserResource;
 use App\Models\Direction;
+use App\Models\EntiteGeographique;
 use App\Models\Permission;
 use App\Models\Role;
 use App\Models\Service;
+use App\Models\TypeSortie;
 use App\Models\User;
 use Closure;
 use Illuminate\Cache\CacheManager;
@@ -33,6 +37,11 @@ use Symfony\Component\HttpFoundation\Response;
 class ParametrageSecurity
 {
     private ?RateLimiter $reauthenticationRateLimiter = null;
+
+    public function __construct(
+        private TypeSortieService $typeSortieService,
+        private EntiteGeographiqueService $entiteGeographiqueService,
+    ) {}
 
     /** @return list<string> */
     public static function adminPermissions(): array
@@ -107,7 +116,7 @@ class ParametrageSecurity
                 if ($reveal) {
                     $rules['password_generation'] = ['required', 'integer', 'numeric:strict', 'min:1'];
                 }
-                if ($delete || $reveal || in_array($permission, ['activate_user', 'deactivate_user', 'reset_user_password', 'assign_role', 'assign_permission'], true) || $request->hasAny(['direction_id', 'service_id', 'statut']) && $id !== null) {
+                if ($delete || $reveal || in_array($permission, ['activate_user', 'deactivate_user', 'activate_type_sortie', 'deactivate_type_sortie', 'activate_entite_geographique', 'deactivate_entite_geographique', 'reset_user_password', 'assign_role', 'assign_permission'], true) || $request->hasAny(['direction_id', 'service_id', 'statut']) && $id !== null) {
                     $rules['motif'] = ['required', 'string', 'max:2000'];
                 }
                 $data = Validator::make($control, $rules)->validate();
@@ -118,14 +127,17 @@ class ParametrageSecurity
                 if (! $reveal) {
                     Validator::make(['Idempotency-Key' => $key], ['Idempotency-Key' => ['required', 'uuid']])->validate();
                 }
+                if (in_array($kind, ['user', 'role', 'permission', 'type_sortie', 'entite_geographique'], true)) {
+                    $this->rejectUnknownReferenceFields($request, $kind, $permission);
+                }
                 if (in_array($permission, ['assign_role', 'assign_permission'], true)) {
                     $field = $permission === 'assign_role' ? 'role_ids' : 'permission_ids';
                     Validator::make($request->only($field), [$field => ['present', 'array', 'list'], $field.'.*' => ['integer', 'numeric:strict', 'min:1', 'distinct']])->validate();
                 }
                 if ($permission === 'reset_user_password' || $reveal || $permission === 'assign_role' && $this->addsSuperAdmin($request, (int) $id)) {
-                    $this->reauthenticate($request, $actor);
+                    $this->reauthenticate($request, $actor, $reveal ? 'current_password' : 'actor_password');
                 }
-                $intent = $request->only(['nom', 'prenom', 'email', 'direction_id', 'service_id', 'statut', 'role_ids', 'permission_ids', 'code', 'libelle', 'description', 'version_attendue', 'motif', 'password_generation']);
+                $intent = $request->only(['nom', 'prenom', 'email', 'direction_id', 'service_id', 'statut', 'role_ids', 'permission_ids', 'code', 'libelle', 'adresse', 'latitude', 'longitude', 'description', 'version_attendue', 'motif', 'password_generation']);
                 if ($delete) {
                     $intent = $data;
                 }
@@ -156,7 +168,7 @@ class ParametrageSecurity
                     }
                 }
                 $class = match ($kind) {
-                    'user' => User::class, 'role' => Role::class, 'permission' => Permission::class
+                    'user' => User::class, 'role' => Role::class, 'permission' => Permission::class, 'type_sortie' => TypeSortie::class, 'entite_geographique' => EntiteGeographique::class
                 };
                 $target = $id === null ? null : $class::query()->lockForUpdate()->findOrFail($id);
                 if ($target !== null && (int) $target->lock_version !== (int) $data['version_attendue']) {
@@ -167,7 +179,7 @@ class ParametrageSecurity
                 }
                 $before = $target === null ? null : $this->snapshot($target);
                 $organisationBefore = $target instanceof User ? $this->organisation($target) : null;
-                $this->protect($request, $target, $permission);
+                $this->protect($request, $target, $permission, $kind);
                 $response = $next($request);
                 if ($response->getStatusCode() >= 400) {
                     throw new HttpResponseException($response);
@@ -179,7 +191,7 @@ class ParametrageSecurity
                 }
                 if ($target === null && $response instanceof JsonResponse) {
                     $body = $response->getData(true);
-                    $target = $class::query()->findOrFail($body['data']['user']['id'] ?? $body['data']['id']);
+                    $target = $class::query()->findOrFail($body['data']['id'] ?? $body['data']['user']['id']);
                 } else {
                     $target = $target?->fresh();
                 }
@@ -202,11 +214,24 @@ class ParametrageSecurity
                         }
                     }
                     $after = $this->snapshot($target);
-                    $resource = match ($kind) {
-                        'user' => new UserResource($target->load('roles.permissions')), 'role' => new RoleResource($target->load('permissions')), 'permission' => new PermissionResource($target)
-                    };
                     $body = $response->getData(true);
-                    $body['data'] = $kind === 'user' && $id === null ? ['user' => $resource->resolve($request)] : $resource->resolve($request);
+                    if ($permission === 'reset_user_password' && $target instanceof User) {
+                        $body['data'] = [
+                            'must_change_password' => (bool) $target->must_change_password,
+                            'temporary_password_available' => $target->must_change_password && $target->temporary_password !== null,
+                            'password_generation' => (int) $target->password_generation,
+                            'lock_version' => (int) $target->lock_version,
+                        ];
+                    } else {
+                        $resource = match ($kind) {
+                            'user' => new UserResource($target->load('roles.permissions')),
+                            'role' => new RoleResource($target->load('permissions')),
+                            'permission' => new PermissionResource($target),
+                            'type_sortie' => new ParamTypeSortieResource($target),
+                            'entite_geographique' => new ParamLieuResource($target),
+                        };
+                        $body['data'] = $resource->resolve($request);
+                    }
                     $response->setData($body);
                 } else {
                     $after = null;
@@ -238,16 +263,21 @@ class ParametrageSecurity
         return $super !== null && in_array($super->id, $request->input('role_ids', []), true) && ! User::query()->findOrFail($id)->roles()->whereKey($super->id)->exists();
     }
 
-    private function reauthenticate(Request $request, User $actor): void
+    private function reauthenticate(Request $request, User $actor, string $passwordField = 'current_password'): void
     {
         $key = 'parametrage-reauth:'.$actor->id.':'.$request->ip();
         $limiter = $this->reauthenticationLimiter();
         if ($limiter->tooManyAttempts($key, 5)) {
-            $this->fail(429, 'TOO_MANY_ATTEMPTS', 'Trop de tentatives de réauthentification.');
+            $this->fail(429, 'TOO_MANY_ATTEMPTS', 'Trop de tentatives de réauthentification.', [
+                'Retry-After' => (string) max(1, $limiter->availableIn($key)),
+            ]);
         }
         $limiter->hit($key, 60);
-        Validator::make($request->only('current_password'), ['current_password' => ['required', 'string']])->validate();
-        if (! Hash::check($request->input('current_password'), $actor->password)) {
+        $rules = $passwordField === 'actor_password'
+            ? ['required', 'string', 'min:8', 'max:12']
+            : ['required', 'string'];
+        Validator::make($request->only($passwordField), [$passwordField => $rules])->validate();
+        if (! Hash::check($request->input($passwordField), $actor->password)) {
             $this->fail(401, 'REAUTHENTICATION_FAILED', 'Réauthentification incorrecte.');
         }
     }
@@ -272,8 +302,16 @@ class ParametrageSecurity
         return $this->reauthenticationRateLimiter = new RateLimiter($cache);
     }
 
-    private function protect(Request $request, ?Model $target, string $permission): void
+    private function protect(Request $request, ?Model $target, string $permission, string $kind): void
     {
+        $this->rejectUnknownReferenceFields($request, $kind, $permission);
+
+        if ($target instanceof TypeSortie && $permission === 'update_type_sortie' && $this->typeSortieService->isUsed($target)) {
+            $this->fail(409, 'REFERENCE_IN_USE', 'Ce type de sortie est utilisé et ne peut plus être modifié.');
+        }
+        if ($target instanceof EntiteGeographique && $permission === 'update_entite_geographique' && $this->entiteGeographiqueService->isUsed($target)) {
+            $this->fail(409, 'REFERENCE_IN_USE', 'Cette entité géographique est utilisée et ne peut plus être modifiée.');
+        }
         foreach (['assign_role' => ['role_ids', Role::class], 'assign_permission' => ['permission_ids', Permission::class]] as $operation => [$field, $class]) {
             if ($permission === $operation) {
                 $ids = Validator::make($request->only($field), [$field => ['present', 'array'], $field.'.*' => ['integer', 'distinct']])->validate()[$field];
@@ -300,8 +338,11 @@ class ParametrageSecurity
         if ($target instanceof Permission && in_array($permission, ['delete_permission', 'update_permission'], true)) {
             $protected = in_array($target->name, [...self::adminPermissions(), ...self::demandeurPermissions()], true);
             $rename = $request->has('code') && $request->input('code') !== $target->name;
-            if (($permission === 'delete_permission' || $rename) && ($protected || $target->roles()->exists() || $target->users()->exists() || $this->historicallyReferenced('role', 'permission_ids', $target->id))) {
-                $this->fail(409, 'SYSTEM_OBJECT_PROTECTED', 'Permission protégée ou encore utilisée.');
+            if (($permission === 'delete_permission' || $rename) && $protected) {
+                $this->fail(409, 'SYSTEM_OBJECT_PROTECTED', 'Code de permission système protégé.');
+            }
+            if (($permission === 'delete_permission' || $rename) && ($target->roles()->exists() || $target->users()->exists() || $this->historicallyReferenced('role', 'permission_ids', $target->id))) {
+                $this->fail(409, 'REFERENCE_IN_USE', 'Cette permission est encore utilisée ou historiquement attribuée.');
             }
         }
         if ($target instanceof User && $permission === 'update_user' || $permission === 'create_user') {
@@ -325,6 +366,60 @@ class ParametrageSecurity
         }
     }
 
+    private function rejectUnknownReferenceFields(Request $request, string $kind, string $permission): void
+    {
+        $allowedFields = match ($kind) {
+            'user' => match ($permission) {
+                'activate_user', 'deactivate_user' => ['version_attendue', 'motif'],
+                'reset_user_password' => ['version_attendue', 'motif', 'actor_password'],
+                'read_temporary_password' => ['version_attendue', 'password_generation', 'motif', 'current_password'],
+                'assign_role' => ['role_ids', 'version_attendue', 'motif', 'actor_password'],
+                default => null,
+            },
+            'role' => match ($permission) {
+                'create_role' => ['nom', 'description', 'statut'],
+                'update_role' => ['nom', 'description', 'statut', 'version_attendue', 'motif'],
+                'delete_role' => [],
+                'assign_permission' => ['permission_ids', 'version_attendue', 'motif'],
+                default => null,
+            },
+            'permission' => match ($permission) {
+                'create_permission' => ['code', 'libelle', 'description'],
+                'update_permission' => ['code', 'libelle', 'description', 'version_attendue', 'motif'],
+                'delete_permission' => [],
+                default => null,
+            },
+            'type_sortie' => match ($permission) {
+                'create_type_sortie' => ['code', 'libelle'],
+                'update_type_sortie' => ['libelle', 'version_attendue', 'motif'],
+                'delete_type_sortie' => [],
+                'activate_type_sortie', 'deactivate_type_sortie' => ['version_attendue', 'motif'],
+                default => null,
+            },
+            'entite_geographique' => match ($permission) {
+                'create_entite_geographique' => ['adresse', 'latitude', 'longitude', 'description'],
+                'update_entite_geographique' => ['adresse', 'latitude', 'longitude', 'description', 'version_attendue', 'motif'],
+                'delete_entite_geographique' => [],
+                'activate_entite_geographique', 'deactivate_entite_geographique' => ['version_attendue', 'motif'],
+                default => null,
+            },
+            default => null,
+        };
+        if ($allowedFields === null) {
+            return;
+        }
+
+        $unknownFields = array_diff(array_keys($request->all()), $allowedFields);
+        if ($unknownFields !== []) {
+            $errors = [];
+            foreach ($unknownFields as $field) {
+                $errors[$field] = ['Ce champ n’est pas pris en charge par cette opération.'];
+            }
+
+            throw ValidationException::withMessages($errors);
+        }
+    }
+
     private function historicallyReferenced(string $kind, string $field, int $id): bool
     {
         return DB::table('organisation_audits')->where('object_type', $kind)->where(function ($query) use ($field, $id): void {
@@ -343,7 +438,13 @@ class ParametrageSecurity
     /** @return array<string, mixed> */
     private function snapshot(Model $target): array
     {
-        $data = $target->only($target instanceof User ? ['id', 'nom', 'prenom', 'email', 'statut', 'direction_id', 'service_id', 'must_change_password', 'password_generation', 'lock_version'] : ($target instanceof Role ? ['id', 'name', 'description', 'statut', 'system_key', 'lock_version'] : ['id', 'name', 'libelle', 'description', 'lock_version']));
+        $data = match (true) {
+            $target instanceof User => $target->only(['id', 'nom', 'prenom', 'email', 'statut', 'direction_id', 'service_id', 'must_change_password', 'password_generation', 'lock_version']),
+            $target instanceof Role => $target->only(['id', 'name', 'description', 'statut', 'system_key', 'lock_version']),
+            $target instanceof TypeSortie => $target->only(['id', 'code', 'libelle', 'statut', 'lock_version']),
+            $target instanceof EntiteGeographique => $target->only(['id', 'adresse', 'latitude', 'longitude', 'description', 'statut', 'lock_version']),
+            default => $target->only(['id', 'name', 'libelle', 'description', 'lock_version']),
+        };
         if ($target instanceof User) {
             $data['role_ids'] = $target->roles()->orderBy('id')->pluck('roles.id')->all();
         }
@@ -365,8 +466,9 @@ class ParametrageSecurity
         DB::table('organisation_audits')->insert(['actor_id' => $actor, 'action' => $action, 'object_type' => $kind, 'object_id' => $id, 'motif' => $motif, 'before_values' => $before === null ? null : json_encode($before, JSON_THROW_ON_ERROR), 'after_values' => json_encode($after, JSON_THROW_ON_ERROR), 'command_key' => $key ?? (string) Str::uuid(), 'created_at' => now()]);
     }
 
-    public function fail(int $status, string $code, string $message): never
+    /** @param array<string, string> $headers */
+    public function fail(int $status, string $code, string $message, array $headers = []): never
     {
-        throw new HttpResponseException(response()->json(['message' => $message, 'code' => $code], $status));
+        throw new HttpResponseException(response()->json(['message' => $message, 'code' => $code], $status, $headers));
     }
 }

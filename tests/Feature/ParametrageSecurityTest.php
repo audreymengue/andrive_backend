@@ -98,7 +98,7 @@ class ParametrageSecurityTest extends TestCase
         $data = ['nom' => 'Test', 'prenom' => 'Compte', 'email' => 'nouveau-parametrage@example.test', 'direction_id' => $direction->id, 'service_id' => $service->id];
         $key = (string) Str::uuid();
         $first = $this->command('POST', '/api/users', $data, $key)->assertCreated()->assertJsonMissingPath('data.temporary_password');
-        $id = $first->json('data.user.id');
+        $id = $first->json('data.id');
         $this->command('POST', '/api/users', $data, $key)->assertCreated()->assertExactJson($first->json());
         $user = User::findOrFail($id);
         $this->assertTrue($user->must_change_password);
@@ -233,11 +233,14 @@ class ParametrageSecurityTest extends TestCase
         $user = User::factory()->create();
         $old = $user->createToken('ancien')->plainTextToken;
         $key = (string) Str::uuid();
-        $data = ['version_attendue' => 0, 'motif' => 'Reset test', 'current_password' => 'AdminPass123'];
+        $data = ['version_attendue' => 0, 'motif' => 'Reset test', 'actor_password' => 'AdminPass123'];
         $first = $this->command('POST', '/api/users/'.$user->id.'/reset-password', $data, $key)->assertOk()->assertJsonMissingPath('data.temporary_password')->assertJsonPath('data.password_generation', 2);
         $this->command('POST', '/api/users/'.$user->id.'/reset-password', $data, $key)->assertOk()->assertExactJson($first->json());
         $this->assertSame(0, $user->tokens()->count());
         $reveal = ['version_attendue' => 1, 'password_generation' => 2, 'motif' => 'Communication test', 'current_password' => 'AdminPass123'];
+        $this->postJson('/api/users/'.$user->id.'/temporary-password/reveal', [...$reveal, 'champ_inattendu' => 'ne pas accepter'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('champ_inattendu');
         $response = $this->postJson('/api/users/'.$user->id.'/temporary-password/reveal', $reveal)->assertOk();
         $this->assertStringContainsString('no-store', $response->headers->get('Cache-Control'));
         $secret = $response->json('data.temporary_password');
@@ -268,7 +271,12 @@ class ParametrageSecurityTest extends TestCase
         for ($i = 0; $i < 5; $i++) {
             $this->postJson('/api/users/'.$user->id.'/temporary-password/reveal', $data)->assertUnauthorized();
         }
-        $this->postJson('/api/users/'.$user->id.'/temporary-password/reveal', $data)->assertTooManyRequests();
+        $limited = $this->postJson('/api/users/'.$user->id.'/temporary-password/reveal', $data)
+            ->assertTooManyRequests()
+            ->assertJsonPath('code', 'TOO_MANY_ATTEMPTS')
+            ->assertHeader('Retry-After');
+        $this->assertGreaterThanOrEqual(1, (int) $limited->headers->get('Retry-After'));
+        $this->assertLessThanOrEqual(60, (int) $limited->headers->get('Retry-After'));
         $this->assertSame(0, $user->fresh()->lock_version);
         $this->assertStringNotContainsString('incorrect', json_encode(DB::table('organisation_audits')->where('object_id', $user->id)->get()));
     }
@@ -295,8 +303,78 @@ class ParametrageSecurityTest extends TestCase
         $role = Role::where('system_key', 'super_admin')->firstOrFail();
         $data = ['role_ids' => [$role->id], 'version_attendue' => 0, 'motif' => 'Test nomination'];
         $this->command('PUT', '/api/users/'.$user->id.'/roles', $data)->assertUnprocessable();
-        $this->command('PUT', '/api/users/'.$user->id.'/roles', [...$data, 'current_password' => 'incorrect'])->assertUnauthorized();
-        $this->command('PUT', '/api/users/'.$user->id.'/roles', [...$data, 'current_password' => 'AdminPass123'])->assertOk();
+        $this->command('PUT', '/api/users/'.$user->id.'/roles', [...$data, 'actor_password' => 'incorrect'])->assertUnauthorized();
+        $this->command('PUT', '/api/users/'.$user->id.'/roles', [...$data, 'actor_password' => 'AdminPass123'])->assertOk();
+    }
+
+    public function test_user_action_payloads_are_strict_and_password_reset_matches_its_contract(): void
+    {
+        $this->admin();
+        $user = User::factory()->create();
+
+        $this->command('PATCH', '/api/users/'.$user->id.'/activate', [
+            'version_attendue' => 0,
+            'motif' => 'Activation contrôlée',
+            'statut' => 'INACTIF',
+        ])->assertUnprocessable();
+        $this->assertSame('ACTIF', $user->fresh()->statut);
+
+        $this->command('PATCH', '/api/users/'.$user->id.'/deactivate', [
+            'version_attendue' => 0,
+            'motif' => 'Désactivation contrôlée',
+            'email' => 'intrus@example.test',
+        ])->assertUnprocessable();
+        $this->assertSame('ACTIF', $user->fresh()->statut);
+
+        $activatedUser = User::factory()->create(['statut' => 'INACTIF']);
+        $key = (string) Str::uuid();
+        $activation = [
+            'version_attendue' => 0,
+            'motif' => 'Activation contrôlée',
+        ];
+        $this->command('PATCH', '/api/users/'.$activatedUser->id.'/activate', $activation, $key)
+            ->assertOk()->assertJsonPath('data.statut', 'ACTIF')->assertJsonPath('data.lock_version', 1);
+        $this->command('PATCH', '/api/users/'.$activatedUser->id.'/activate', [...$activation, 'extra' => true], $key)
+            ->assertUnprocessable();
+
+        $role = Role::factory()->create();
+        $this->command('PUT', '/api/users/'.$user->id.'/roles', [
+            'role_ids' => [$role->id],
+            'version_attendue' => 0,
+            'motif' => 'Attribution contrôlée',
+            'extra' => true,
+        ])->assertUnprocessable();
+        $this->assertFalse($user->fresh()->roles()->whereKey($role->id)->exists());
+
+        $this->command('POST', '/api/users/'.$user->id.'/reset-password', [
+            'version_attendue' => 0,
+            'motif' => 'Reset contrôlé',
+            'actor_password' => 'AdminPass123',
+            'password' => 'valeur interdite',
+        ])->assertUnprocessable();
+        $this->assertSame(1, (int) $user->fresh()->password_generation);
+
+        $response = $this->command('POST', '/api/users/'.$user->id.'/reset-password', [
+            'version_attendue' => 0,
+            'motif' => 'Reset contrôlé',
+            'actor_password' => 'AdminPass123',
+        ])->assertOk();
+
+        $this->assertSame(
+            ['must_change_password', 'temporary_password_available', 'password_generation', 'lock_version'],
+            array_keys($response->json('data')),
+        );
+        $this->assertSame(true, $response->json('data.temporary_password_available'));
+        $this->assertSame(2, $response->json('data.password_generation'));
+        $this->assertSame(1, $response->json('data.lock_version'));
+        $this->assertArrayNotHasKey('temporary_password', $response->json('data'));
+
+        $contract = Yaml::parseFile(base_path('openapi.yaml'));
+        $expectedKeys = array_keys($contract['components']['schemas']['ParamPasswordResetData']['properties']);
+        $actualKeys = array_keys($response->json('data'));
+        sort($expectedKeys);
+        sort($actualKeys);
+        $this->assertSame($expectedKeys, $actualKeys);
     }
 
     public function test_permission_application_codes_and_direct_dependencies_are_protected(): void
@@ -306,8 +384,48 @@ class ParametrageSecurityTest extends TestCase
         $this->command('PUT', '/api/permissions/'.$permission->id, ['code' => 'code_modifie', 'version_attendue' => 0])->assertConflict();
         $custom = Permission::factory()->create();
         User::factory()->create()->givePermissionTo($custom);
-        $this->delete('/api/permissions/'.$custom->id, [], ['Accept' => 'application/json', 'Idempotency-Key' => (string) Str::uuid(), 'X-Expected-Version' => '0', 'X-Change-Reason' => 'Test'])->assertConflict();
+        $this->delete('/api/permissions/'.$custom->id, [], ['Accept' => 'application/json', 'Idempotency-Key' => (string) Str::uuid(), 'X-Expected-Version' => '0', 'X-Change-Reason' => 'Test'])
+            ->assertConflict()->assertJsonPath('code', 'REFERENCE_IN_USE');
         $this->assertDatabaseHas('permissions', ['id' => $custom->id]);
+    }
+
+    public function test_role_and_permission_commands_reject_unknown_fields_before_replay(): void
+    {
+        $this->admin();
+
+        $this->command('POST', '/api/roles', ['nom' => 'role_injection', 'system_key' => 'super_admin'])->assertUnprocessable();
+        $this->assertDatabaseMissing('roles', ['name' => 'role_injection']);
+
+        $this->command('POST', '/api/permissions', [
+            'code' => 'permission_injection',
+            'libelle' => 'Permission test',
+            'guard_name' => 'api',
+        ])->assertUnprocessable();
+        $this->assertDatabaseMissing('permissions', ['name' => 'permission_injection']);
+
+        $role = Role::factory()->create(['description' => 'Avant']);
+        $key = (string) Str::uuid();
+        $update = ['description' => 'Après', 'version_attendue' => 0, 'motif' => 'Mise à jour test'];
+        $this->command('PUT', '/api/roles/'.$role->id, $update, $key)->assertOk();
+        $this->command('PUT', '/api/roles/'.$role->id, [...$update, 'system_key' => 'super_admin'], $key)->assertUnprocessable();
+        $this->assertSame('Après', $role->fresh()->description);
+
+        $permission = Permission::factory()->create();
+        $this->command('PUT', '/api/roles/'.$role->id.'/permissions', [
+            'permission_ids' => [$permission->id],
+            'version_attendue' => 1,
+            'motif' => 'Attribution test',
+            'name' => 'forbidden',
+        ])->assertUnprocessable();
+        $this->assertFalse($role->fresh()->permissions()->whereKey($permission->id)->exists());
+
+        $originalDescription = $permission->description;
+        $this->command('PUT', '/api/permissions/'.$permission->id, [
+            'description' => 'Ne doit pas être écrasée',
+            'version_attendue' => 0,
+            'guard_name' => 'api',
+        ])->assertUnprocessable();
+        $this->assertSame($originalDescription, $permission->fresh()->description);
     }
 
     public function test_lost_permission_blocks_replay_and_list_filters_are_validated(): void
@@ -322,6 +440,19 @@ class ParametrageSecurityTest extends TestCase
         $this->getJson('/api/roles?search='.$role->name.'&statut=ACTIF&per_page=1')->assertOk()->assertJsonPath('meta.per_page', 1);
         $actor->roles()->where('system_key', 'super_admin')->firstOrFail()->revokePermissionTo('update_role');
         $this->command('PUT', '/api/roles/'.$role->id, $data, $key)->assertForbidden();
+    }
+
+    public function test_user_read_filters_reject_empty_integer_values_and_missing_users_return_openapi_codes(): void
+    {
+        $this->admin();
+
+        $this->getJson('/api/users?per_page=')
+            ->assertUnprocessable()
+            ->assertJsonPath('code', 'VALIDATION_ERROR')
+            ->assertJsonValidationErrors('per_page');
+        $this->getJson('/api/users/999999999')
+            ->assertNotFound()
+            ->assertJsonPath('code', 'NOT_FOUND');
     }
 
     public function test_missing_guard_blocks_mutations_without_partial_writes(): void
@@ -430,6 +561,24 @@ class ParametrageSecurityTest extends TestCase
         sort($actual);
         sort($expected);
         $this->assertSame($expected, $actual);
+        foreach ([
+            '/api/parametrage/types-sortie' => 'get',
+            '/api/types-sortie/{id}/activate' => 'put',
+            '/api/types-sortie/{id}/deactivate' => 'put',
+            '/api/parametrage/entites-geographiques' => 'get',
+            '/api/entites-geographiques/{id}/activate' => 'put',
+            '/api/entites-geographiques/{id}/deactivate' => 'put',
+            '/api/users/{id}/temporary-password/reveal' => 'post',
+        ] as $path => $method) {
+            $operation = $contract['paths'][$path][$method];
+            $this->assertSame('implemented', $operation['x-implementation-status']);
+            $this->assertSame('implemented', $operation['x-contract-status']);
+            $this->assertStringNotContainsString('ROUTE ABSENTE', $operation['description']);
+            $this->assertArrayHasKey('422', $operation['responses']);
+        }
+        $revealRateLimit = $contract['paths']['/api/users/{id}/temporary-password/reveal']['post']['responses']['429'];
+        $this->assertArrayHasKey('Retry-After', $revealRateLimit['headers']);
+        $this->assertSame('TOO_MANY_ATTEMPTS', $revealRateLimit['content']['application/json']['example']['code']);
         foreach (['ParamUser' => '/api/users/'.$actor->id, 'ParamRole' => '/api/roles/'.Role::where('system_key', 'super_admin')->firstOrFail()->id, 'ParamPermission' => '/api/permissions/'.Permission::firstOrFail()->id] as $schema => $path) {
             $response = $this->getJson($path)->assertOk();
             $keys = array_keys($contract['components']['schemas'][$schema]['properties']);
@@ -476,13 +625,29 @@ class ParametrageSecurityTest extends TestCase
     public function test_permission_and_role_deletion_never_detach_current_assignments(): void
     {
         $this->admin();
+        $userAssignedRole = Role::factory()->create();
+        $user = User::factory()->create();
+        $user->assignRole($userAssignedRole);
+        $userHeaders = ['Accept' => 'application/json', 'Idempotency-Key' => (string) Str::uuid(), 'X-Expected-Version' => '0', 'X-Change-Reason' => 'Test'];
+        $this->delete('/api/roles/'.$userAssignedRole->id, [], $userHeaders)->assertConflict()->assertJsonPath('code', 'REFERENCE_IN_USE');
+        $this->assertTrue($user->fresh()->roles()->whereKey($userAssignedRole->id)->exists());
+
         $role = Role::factory()->create();
         $permission = Permission::factory()->create();
         $role->givePermissionTo($permission);
         $headers = ['Accept' => 'application/json', 'Idempotency-Key' => (string) Str::uuid(), 'X-Expected-Version' => '0', 'X-Change-Reason' => 'Test'];
-        $this->delete('/api/roles/'.$role->id, [], $headers)->assertConflict();
-        $this->delete('/api/permissions/'.$permission->id, [], [...$headers, 'Idempotency-Key' => (string) Str::uuid()])->assertConflict();
+        $this->delete('/api/roles/'.$role->id, [], $headers)->assertConflict()->assertJsonPath('code', 'REFERENCE_IN_USE');
+        $this->delete('/api/permissions/'.$permission->id, [], [...$headers, 'Idempotency-Key' => (string) Str::uuid()])->assertConflict()->assertJsonPath('code', 'REFERENCE_IN_USE');
         $this->assertTrue($role->fresh()->permissions()->whereKey($permission->id)->exists());
+
+        $unusedPermission = Permission::factory()->create();
+        $this->delete('/api/permissions/'.$unusedPermission->id, [], [
+            'Accept' => 'application/json',
+            'Idempotency-Key' => (string) Str::uuid(),
+            'X-Expected-Version' => '0',
+            'X-Change-Reason' => 'Suppression test',
+        ])->assertNoContent();
+        $this->assertDatabaseMissing('permissions', ['id' => $unusedPermission->id]);
     }
 
     public function test_inactive_account_with_a_legacy_token_cannot_access_authenticated_routes(): void

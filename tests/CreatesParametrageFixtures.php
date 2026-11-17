@@ -41,12 +41,15 @@ trait CreatesParametrageFixtures
         if ($method === 'DELETE') {
             return $this->delete($path, [], [...$headers, 'Accept' => 'application/json', 'X-Expected-Version' => (string) $version, 'X-Change-Reason' => rawurlencode('TEST suppression')]);
         }
-        $control = ['motif' => 'TEST suite generale'];
+        $control = [];
+        if (! ($method === 'POST' && in_array($path, ['/api/users', '/api/roles', '/api/permissions'], true))) {
+            $control['motif'] = 'TEST suite generale';
+        }
         if (isset($matches[2])) {
             $control['version_attendue'] = $version;
         }
         if (str_ends_with($path, '/reset-password')) {
-            $control['current_password'] = 'AdminPass123';
+            $control['actor_password'] = 'AdminPass123';
         }
 
         return $this->json($method, $path, [...$control, ...$data], $headers);

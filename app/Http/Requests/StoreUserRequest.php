@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class StoreUserRequest extends ApiFormRequest
 {
@@ -21,5 +22,14 @@ class StoreUserRequest extends ApiFormRequest
             'service_id' => ['sometimes', 'nullable', 'integer', 'numeric:strict', 'min:1', Rule::exists('services', 'id')],
             'direction_id' => ['required', 'integer', 'numeric:strict', 'min:1', Rule::exists('directions', 'id')],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            foreach (array_diff(array_keys($this->all()), ['nom', 'prenom', 'email', 'direction_id', 'service_id']) as $field) {
+                $validator->errors()->add($field, 'Ce champ n’est pas pris en charge par cette opération.');
+            }
+        });
     }
 }

@@ -24,11 +24,11 @@ class AuthController extends Controller
         $result = $this->authService->login($data['email'], $data['password']);
 
         if ($result['reason'] === 'invalid_credentials') {
-            return response()->json(['message' => 'Les identifiants fournis sont incorrects.'], 401);
+            return response()->json(['message' => 'Les identifiants fournis sont incorrects.', 'code' => 'UNAUTHENTICATED'], 401);
         }
 
         if ($result['reason'] === 'inactive') {
-            return response()->json(['message' => 'Ce compte est désactivé.'], 403);
+            return response()->json(['message' => 'Ce compte est désactivé.', 'code' => 'FORBIDDEN'], 403);
         }
 
         /** @var User $user */
@@ -72,7 +72,7 @@ class AuthController extends Controller
         $data = $request->validated();
 
         if (! $user->must_change_password && ! $this->passwordService->matches($user, $data['current_password'])) {
-            return response()->json(['message' => 'L’ancien mot de passe est incorrect.'], 401);
+            return response()->json(['message' => 'L’ancien mot de passe est incorrect.', 'code' => 'UNAUTHENTICATED'], 401);
         }
 
         $this->passwordService->change($user, $data['new_password']);

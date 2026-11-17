@@ -32,6 +32,7 @@ class EntiteGeographique extends Model
         return [
             'latitude' => 'decimal:7',
             'longitude' => 'decimal:7',
+            'lock_version' => 'integer',
         ];
     }
 

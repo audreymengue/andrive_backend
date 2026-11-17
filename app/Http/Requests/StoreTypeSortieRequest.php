@@ -3,8 +3,10 @@
 namespace App\Http\Requests;
 
 use Illuminate\Contracts\Validation\ValidationRule;
+use Illuminate\Foundation\Http\Attributes\FailOnUnknownFields;
 use Illuminate\Validation\Rule;
 
+#[FailOnUnknownFields]
 class StoreTypeSortieRequest extends ApiFormRequest
 {
     /**

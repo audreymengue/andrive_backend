@@ -50,7 +50,7 @@ class PermissionApiTest extends TestCase
 
         $this->withToken($token)->command('DELETE', "/api/permissions/{$permission->id}")
             ->assertConflict()
-            ->assertJsonPath('code', 'SYSTEM_OBJECT_PROTECTED');
+            ->assertJsonPath('code', 'REFERENCE_IN_USE');
 
         $this->assertModelExists($permission);
         $this->assertTrue($role->fresh()->hasPermissionTo($permission));

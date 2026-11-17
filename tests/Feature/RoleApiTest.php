@@ -66,7 +66,8 @@ class RoleApiTest extends TestCase
 
         $this->withToken($token)->command('DELETE', "/api/roles/{$role->id}")
             ->assertConflict()
-            ->assertJsonPath('message', 'Impossible de supprimer ce rôle car il est encore utilisé.');
+            ->assertJsonPath('message', 'Impossible de supprimer ce rôle car il est encore utilisé.')
+            ->assertJsonPath('code', 'REFERENCE_IN_USE');
 
         $this->assertModelExists($role);
         $this->assertTrue($user->fresh()->hasRole($role));
@@ -91,7 +92,8 @@ class RoleApiTest extends TestCase
 
         $this->withToken($token)->command('DELETE', "/api/roles/{$role->id}")
             ->assertConflict()
-            ->assertJsonPath('message', 'Impossible de supprimer ce rôle car il est encore utilisé.');
+            ->assertJsonPath('message', 'Impossible de supprimer ce rôle car il est encore utilisé.')
+            ->assertJsonPath('code', 'REFERENCE_IN_USE');
 
         $this->assertModelExists($role);
         $this->assertTrue($role->fresh()->hasPermissionTo($permission));

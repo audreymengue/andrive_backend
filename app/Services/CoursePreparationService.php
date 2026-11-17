@@ -20,6 +20,7 @@ use App\Models\DemandeObjet;
 use App\Models\IndisponibiliteRessource;
 use App\Models\User;
 use App\Models\Vehicule;
+use App\Notifications\TreatmentNotification;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -177,7 +178,7 @@ class CoursePreparationService
                 $this->fail(409, 'COURSE_NOT_READY', 'La période d’occupation, la validation manuelle du chargement et au moins un arrêt sont obligatoires.');
             }
 
-            $demandes = $preparation->demandes()->orderBy('demandes.id')->lockForUpdate()->get();
+            $demandes = $preparation->demandes()->with('demandeur:id')->orderBy('demandes.id')->lockForUpdate()->get();
             if ($demandes->isEmpty()) {
                 $this->fail(409, 'COURSE_NOT_READY', 'Au moins une demande doit être sélectionnée.');
             }
@@ -207,6 +208,9 @@ class CoursePreparationService
                 ]);
             }
             $this->recordEvent($course->id, $request->user()->id, 'confirmed', $newVersion, $demandes->modelKeys(), $key);
+            $this->notifyDemanders($demandes, 'DEMANDE_VALIDEE', $course->id);
+            $assignedChauffeur = Chauffeur::query()->with('user:id')->find($chauffeurId);
+            $assignedChauffeur?->user?->notify(new TreatmentNotification('COURSE_ASSIGNEE', 'Une Course vous a été affectée.', $course->id));
 
             $course->load(['preparations.demandes:id', 'currentPreparation.demandes:id']);
 
@@ -243,7 +247,9 @@ class CoursePreparationService
 
             $newVersion = (int) $course->lock_version + 1;
             $course->forceFill(['statut_execution' => 'EN_COURS', 'demarree_a' => now(), 'lock_version' => $newVersion])->save();
-            $this->recordEvent($course->id, $request->user()->id, 'started', $newVersion, $preparation->demandes()->pluck('demandes.id')->map(fn ($value): int => (int) $value)->all(), $key);
+            $demandes = $preparation->demandes()->with('demandeur:id')->get();
+            $this->recordEvent($course->id, $request->user()->id, 'started', $newVersion, $demandes->modelKeys(), $key);
+            $this->notifyDemanders($demandes, 'COURSE_DEMARREE', $course->id);
             $course->load(['preparations.demandes:id', 'currentPreparation.demandes:id']);
 
             return ['message' => 'Course démarrée.', 'data' => (new CourseResource($course))->resolve($request)];
@@ -291,7 +297,9 @@ class CoursePreparationService
                 'vehicule_libere_a' => $vehicleReleasedAt,
                 'lock_version' => $newVersion,
             ])->save();
-            $this->recordEvent($course->id, $request->user()->id, 'finished', $newVersion, $preparation->demandes()->pluck('demandes.id')->map(fn ($value): int => (int) $value)->all(), $key);
+            $demandes = $preparation->demandes()->with('demandeur:id')->get();
+            $this->recordEvent($course->id, $request->user()->id, 'finished', $newVersion, $demandes->modelKeys(), $key);
+            $this->notifyDemanders($demandes, 'COURSE_TERMINEE', $course->id);
             $course->load(['preparations.demandes:id', 'currentPreparation.demandes:id']);
 
             return ['message' => 'Course terminée et libération des ressources attestée.', 'data' => (new CourseResource($course))->resolve($request)];
@@ -486,6 +494,25 @@ class CoursePreparationService
     private function recordEvent(int $courseId, int $actorId, string $action, int $version, array $ids, string $key): void
     {
         DB::table('course_events')->insert(['course_id' => $courseId, 'actor_id' => $actorId, 'action' => $action, 'version' => $version, 'demande_ids' => json_encode($ids, JSON_THROW_ON_ERROR), 'command_key' => $key, 'created_at' => now()]);
+    }
+
+    /** @param iterable<Demande> $demandes */
+    private function notifyDemanders(iterable $demandes, string $event, int $courseId): void
+    {
+        foreach ($demandes as $demande) {
+            $demande->demandeur?->notify(new TreatmentNotification(
+                $event,
+                match ($event) {
+                    'DEMANDE_VALIDEE' => 'Votre demande '.$demande->reference.' a été validée.',
+                    'COURSE_DEMARREE' => 'La Course liée à votre demande '.$demande->reference.' a démarré.',
+                    'COURSE_TERMINEE' => 'La Course liée à votre demande '.$demande->reference.' est terminée.',
+                    default => 'Une mise à jour concerne votre demande '.$demande->reference.'.',
+                },
+                $courseId,
+                (int) $demande->id,
+                $demande->reference,
+            ));
+        }
     }
 
     /** @return array{current_page: int, per_page: int, total: int, last_page: int} */

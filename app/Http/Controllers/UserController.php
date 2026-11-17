@@ -37,9 +37,7 @@ class UserController extends Controller
 
         return response()->json([
             'message' => 'Utilisateur créé avec succès.',
-            'data' => [
-                'user' => new UserResource($result['user']->load('roles.permissions')),
-            ],
+            'data' => new UserResource($result['user']->load('roles.permissions')),
         ], 201);
     }
 

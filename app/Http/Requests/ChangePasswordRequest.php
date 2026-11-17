@@ -4,9 +4,11 @@ namespace App\Http\Requests;
 
 use App\Services\PasswordService;
 use Illuminate\Contracts\Validation\ValidationRule;
+use Illuminate\Foundation\Http\Attributes\FailOnUnknownFields;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Validator;
 
+#[FailOnUnknownFields]
 class ChangePasswordRequest extends ApiFormRequest
 {
     /**
@@ -32,6 +34,7 @@ class ChangePasswordRequest extends ApiFormRequest
         return [
             'current_password' => $currentPasswordRules,
             'new_password' => $newPasswordRules,
+            'new_password_confirmation' => ['required', 'string', 'between:'.PasswordService::MIN_LENGTH.','.PasswordService::MAX_LENGTH],
         ];
     }
 

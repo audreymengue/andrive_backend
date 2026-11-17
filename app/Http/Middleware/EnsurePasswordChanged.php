@@ -18,7 +18,7 @@ class EnsurePasswordChanged
         if ($request->user()?->must_change_password) {
             return response()->json([
                 'message' => 'Vous devez modifier votre mot de passe avant de poursuivre.',
-                ...(($request->route('treatment_api') || $request->route('resource_profile_kind')) ? ['code' => 'PASSWORD_CHANGE_REQUIRED'] : []),
+                ...(($request->route('treatment_api') || $request->route('resource_profile_kind') || $request->route('notification_api')) ? ['code' => 'PASSWORD_CHANGE_REQUIRED'] : []),
             ], 403);
         }
 

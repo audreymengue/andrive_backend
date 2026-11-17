@@ -30,7 +30,7 @@ class DatabaseSeederTest extends TestCase
 
         $this->seed();
 
-        $this->assertDatabaseCount('permissions', 59);
+        $this->assertDatabaseCount('permissions', 67);
         foreach (['read_user', 'assign_permission', 'read_demande', 'create_demande', 'submit_demande', 'read_type_sortie', 'read_entite_geographique'] as $permission) {
             $this->assertDatabaseHas('permissions', ['name' => $permission, 'guard_name' => 'web']);
         }
@@ -107,7 +107,7 @@ class DatabaseSeederTest extends TestCase
 
         $this->seed();
 
-        $this->assertDatabaseCount('permissions', 59);
+        $this->assertDatabaseCount('permissions', 67);
         $this->assertDatabaseCount('roles', 2);
         $this->assertDatabaseCount('users', 1);
         $this->assertDatabaseHas('users', ['email' => 'admin@aninf.ga', 'must_change_password' => true]);

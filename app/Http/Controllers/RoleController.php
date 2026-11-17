@@ -68,6 +68,7 @@ class RoleController extends Controller
         if ($role->users()->exists() || $role->permissions()->exists()) {
             return response()->json([
                 'message' => 'Impossible de supprimer ce rôle car il est encore utilisé.',
+                'code' => 'REFERENCE_IN_USE',
             ], 409);
         }
 

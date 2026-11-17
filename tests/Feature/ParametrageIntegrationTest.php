@@ -198,7 +198,7 @@ class ParametrageIntegrationTest extends TestCase
         $sb = $this->exchange('POST', '/api/services', ['direction_id' => $b['id'], 'nom' => 'Service B', 'code' => 'IT_SERVICE'], 201)->json('data');
         $this->exchange('PUT', '/api/services/'.$sa['id'], ['description' => 'Service corrige', 'version_attendue' => $sa['lock_version']]);
         $email = 'integration-'.Str::lower(Str::random(12)).'@example.test';
-        $user = $this->exchange('POST', '/api/users', ['nom' => 'Integration', 'prenom' => 'Agent', 'email' => $email, 'direction_id' => $a['id'], 'service_id' => $sa['id']], 201)->assertJsonMissingPath('data.temporary_password')->json('data.user');
+        $user = $this->exchange('POST', '/api/users', ['nom' => 'Integration', 'prenom' => 'Agent', 'email' => $email, 'direction_id' => $a['id'], 'service_id' => $sa['id']], 201)->assertJsonMissingPath('data.temporary_password')->json('data');
         $this->assertTrue(User::findOrFail($user['id'])->roles()->where('system_key', 'demandeur')->exists());
         $role = $this->exchange('POST', '/api/roles', ['nom' => 'IT_ROLE_'.Str::random(12)], 201)->json('data');
         $permissionIds = Permission::whereIn('name', ['read_direction', 'read_demande'])->orderBy('id')->pluck('id')->all();
@@ -244,11 +244,11 @@ class ParametrageIntegrationTest extends TestCase
         $this->exchange('GET', '/api/demandes');
         $this->token($adminToken);
         $user = $this->exchange('GET', '/api/users/'.$user['id'])->json('data');
-        $resetPayload = ['version_attendue' => $user['lock_version'], 'current_password' => 'Admin123!', 'motif' => 'Reset integration'];
+        $resetPayload = ['version_attendue' => $user['lock_version'], 'actor_password' => 'Admin123!', 'motif' => 'Reset integration'];
         $key = (string) Str::uuid();
         $reset = $this->exchange('POST', '/api/users/'.$user['id'].'/reset-password', $resetPayload, key: $key)->assertJsonMissingPath('data.temporary_password');
         $this->exchange('POST', '/api/users/'.$user['id'].'/reset-password', $resetPayload, key: $key)->assertExactJson($reset->json());
-        $user = $reset->json('data');
+        $user = [...$user, ...$reset->json('data')];
         $this->token($userToken);
         $this->exchange('GET', '/api/me', status: 401);
         $this->token(null);
@@ -277,6 +277,40 @@ class ParametrageIntegrationTest extends TestCase
         $this->token($finalToken);
         $this->exchange('POST', '/api/logout');
         $this->exchange('GET', '/api/me', status: 401);
+    }
+
+    public function test_role_and_permission_lifecycle_matches_target_contract_schemas(): void
+    {
+        $this->admin();
+
+        $role = $this->exchange('POST', '/api/roles', [
+            'nom' => 'IT_ROLE_'.Str::upper(Str::random(12)),
+            'description' => 'Role de verification du contrat',
+        ], 201)->json('data');
+        $permission = $this->exchange('POST', '/api/permissions', [
+            'code' => 'read_test_'.Str::lower(Str::random(12)),
+            'libelle' => 'Permission de verification',
+            'description' => 'Permission personnalisee de test',
+        ], 201)->json('data');
+
+        $role = $this->exchange('PUT', '/api/roles/'.$role['id'], [
+            'description' => 'Role modifie',
+            'version_attendue' => $role['lock_version'],
+        ])->json('data');
+        $permission = $this->exchange('PUT', '/api/permissions/'.$permission['id'], [
+            'libelle' => 'Permission modifiee',
+            'version_attendue' => $permission['lock_version'],
+        ])->json('data');
+        $role = $this->exchange('PUT', '/api/roles/'.$role['id'].'/permissions', [
+            'permission_ids' => [$permission['id']],
+            'version_attendue' => $role['lock_version'],
+            'motif' => 'Attribution pour verification du contrat',
+        ])->json('data');
+
+        $this->exchange('GET', '/api/roles/'.$role['id'])->assertJsonPath('data.permissions.0.id', $permission['id']);
+        $this->exchange('GET', '/api/permissions/'.$permission['id'])->assertJsonPath('data.code', $permission['code']);
+        $this->exchange('GET', '/api/roles?search='.$role['nom'].'&per_page=1')->assertJsonPath('meta.per_page', 1);
+        $this->exchange('GET', '/api/permissions?search='.$permission['code'].'&per_page=1')->assertJsonPath('meta.per_page', 1);
     }
 
     public function test_two_administrators_cannot_sequentially_remove_the_last_remaining_one(): void
@@ -423,6 +457,6 @@ class ParametrageIntegrationTest extends TestCase
                 $checked++;
             }
         }
-        $this->assertSame(37, $checked);
+        $this->assertSame(51, $checked);
     }
 }

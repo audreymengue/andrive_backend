@@ -320,7 +320,7 @@ class ParametrageJournalTest extends TestCase
             }
         }
         $this->assertSame($before, $this->journalRows());
-        $this->json('PUT', '/api/users/'.$actor->id, ['nom' => 'Correction autorisée', 'version_attendue' => 0, 'organisation_audits' => [], 'user_organisation_histories' => [], 'parametrage_maintenance_audits' => [], 'before_values' => [], 'after_values' => []], ['Idempotency-Key' => (string) Str::uuid()])->assertOk();
+        $this->json('PUT', '/api/users/'.$actor->id, ['nom' => 'Correction autorisée', 'version_attendue' => 0, 'organisation_audits' => [], 'user_organisation_histories' => [], 'parametrage_maintenance_audits' => [], 'before_values' => [], 'after_values' => []], ['Idempotency-Key' => (string) Str::uuid()])->assertUnprocessable()->assertJsonValidationErrors('organisation_audits');
         $this->assertSame($before['history'], DB::table('user_organisation_histories')->orderBy('id')->get()->toJson());
         $this->assertSame($before['maintenance'], DB::table('parametrage_maintenance_audits')->orderBy('id')->get()->toJson());
         foreach (json_decode($before['audit'], true) as $event) {

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <phpunit bootstrap="vendor/autoload.php" colors="true" cacheResult="false">
- <testsuites><testsuite name="Parametrage"><file>tests/Feature/ParametrageSecurityTest.php</file><file>tests/Feature/OrganisationApiTest.php</file><file>tests/Feature/ParametrageJournalTest.php</file><file>tests/Feature/ParametrageIntegrationTest.php</file><file>tests/Feature/DemandeServiceApiTest.php</file><file>tests/Feature/ResourceProfileApiTest.php</file></testsuite></testsuites>
+ <testsuites><testsuite name="Parametrage"><file>tests/Feature/ParametrageSecurityTest.php</file><file>tests/Feature/OrganisationApiTest.php</file><file>tests/Feature/ParametrageJournalTest.php</file><file>tests/Feature/ParametrageIntegrationTest.php</file><file>tests/Feature/ReferenceCatalogParametrageTest.php</file><file>tests/Feature/DemandeServiceApiTest.php</file><file>tests/Feature/ResourceProfileApiTest.php</file><file>tests/Feature/NotificationsApiTest.php</file></testsuite></testsuites>
  <php>
   <env name="APP_ENV" value="testing" force="true"/>
   <env name="DB_CONNECTION" value="mysql" force="true"/>

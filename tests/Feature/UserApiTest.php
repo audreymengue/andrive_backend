@@ -33,7 +33,7 @@ class UserApiTest extends TestCase
             ->assertJsonPath('code', 'FORBIDDEN');
     }
 
-    public function test_create_user_returns_a_unique_hashed_temporary_password_and_ignores_untrusted_status(): void
+    public function test_create_user_returns_a_unique_hashed_temporary_password_without_exposing_it(): void
     {
         $token = $this->administrativeToken();
         $direction = Direction::factory()->create();
@@ -43,18 +43,17 @@ class UserApiTest extends TestCase
             'prenom' => 'Jean',
             'email' => 'jean@aninf.ga',
             'direction_id' => $direction->id,
-            'statut' => 'INACTIF',
         ]);
 
         $response
             ->assertCreated()
             ->assertJsonPath('message', 'Utilisateur créé avec succès.')
-            ->assertJsonPath('data.user.nom', 'MBOUROU')
-            ->assertJsonPath('data.user.prenom', 'Jean')
-            ->assertJsonPath('data.user.direction_id', $direction->id)
-            ->assertJsonPath('data.user.statut', 'ACTIF')
-            ->assertJsonPath('data.user.must_change_password', true)
-            ->assertJsonMissingPath('data.user.temporary_password');
+            ->assertJsonPath('data.nom', 'MBOUROU')
+            ->assertJsonPath('data.prenom', 'Jean')
+            ->assertJsonPath('data.direction_id', $direction->id)
+            ->assertJsonPath('data.statut', 'ACTIF')
+            ->assertJsonPath('data.must_change_password', true)
+            ->assertJsonMissingPath('data.temporary_password');
 
         $user = User::query()->where('email', 'jean@aninf.ga')->firstOrFail();
         $response->assertJsonMissingPath('data.temporary_password');
@@ -70,6 +69,25 @@ class UserApiTest extends TestCase
         $this->assertNotSame($temporaryPassword, $user->temporary_password);
         $this->assertSame($temporaryPassword, Crypt::decryptString($user->temporary_password));
         $this->assertArrayNotHasKey('temporary_password', $user->toArray());
+    }
+
+    public function test_create_user_rejects_fields_not_declared_by_the_contract(): void
+    {
+        $token = $this->administrativeToken();
+        $direction = Direction::factory()->create();
+
+        $this->withToken($token)->command('POST', '/api/users', [
+            'nom' => 'MBOUROU',
+            'prenom' => 'Jean',
+            'email' => 'extra-field@aninf.ga',
+            'direction_id' => $direction->id,
+            'statut' => 'INACTIF',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonPath('code', 'VALIDATION_ERROR')
+            ->assertJsonValidationErrors('statut');
+
+        $this->assertDatabaseMissing('users', ['email' => 'extra-field@aninf.ga']);
     }
 
     public function test_successive_user_creations_generate_different_temporary_passwords(): void
@@ -314,6 +332,22 @@ class UserApiTest extends TestCase
         $this->withToken($token)->getJson('/api/users?per_page=101')
             ->assertUnprocessable()
             ->assertJsonValidationErrors('per_page');
+    }
+
+    public function test_update_user_rejects_fields_not_declared_by_the_contract(): void
+    {
+        $token = $this->administrativeToken();
+        $user = User::factory()->create();
+
+        $this->withToken($token)->command('PUT', '/api/users/'.$user->id, [
+            'statut' => 'INACTIF',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonPath('code', 'VALIDATION_ERROR')
+            ->assertJsonValidationErrors('statut');
+
+        $this->assertSame('ACTIF', $user->fresh()->statut);
+        $this->assertSame(0, $user->fresh()->lock_version);
     }
 
     public function test_authorized_show_never_reveals_a_temporary_password(): void

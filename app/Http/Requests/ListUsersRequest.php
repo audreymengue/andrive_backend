@@ -15,12 +15,12 @@ class ListUsersRequest extends ApiFormRequest
     public function rules(): array
     {
         return [
-            'direction_id' => ['nullable', 'integer', 'min:1'],
-            'service_id' => ['nullable', 'integer', 'min:1'],
-            'search' => ['nullable', 'string', 'max:255'],
-            'statut' => ['nullable', Rule::in(['ACTIF', 'INACTIF'])],
-            'page' => ['nullable', 'integer', 'min:1'],
-            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'direction_id' => ['sometimes', 'integer', 'min:1'],
+            'service_id' => ['sometimes', 'integer', 'min:1'],
+            'search' => ['sometimes', 'string', 'max:255'],
+            'statut' => ['sometimes', Rule::in(['ACTIF', 'INACTIF'])],
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ];
     }
 }

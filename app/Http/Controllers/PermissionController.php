@@ -64,6 +64,7 @@ class PermissionController extends Controller
         if ($permission->roles()->exists()) {
             return response()->json([
                 'message' => 'Cette permission ne peut pas être supprimée car elle est attribuée à des rôles.',
+                'code' => 'REFERENCE_IN_USE',
             ], 409);
         }
 

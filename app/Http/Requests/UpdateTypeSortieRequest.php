@@ -3,8 +3,9 @@
 namespace App\Http\Requests;
 
 use Illuminate\Contracts\Validation\ValidationRule;
-use Illuminate\Validation\Rule;
+use Illuminate\Foundation\Http\Attributes\FailOnUnknownFields;
 
+#[FailOnUnknownFields]
 class UpdateTypeSortieRequest extends ApiFormRequest
 {
     /**
@@ -15,8 +16,9 @@ class UpdateTypeSortieRequest extends ApiFormRequest
     public function rules(): array
     {
         return [
+            'version_attendue' => ['required', 'integer', 'numeric:strict', 'min:0'],
+            'motif' => ['sometimes', 'string', 'min:1', 'max:1000'],
             'libelle' => ['sometimes', 'required', 'string', 'max:255'],
-            'code' => ['sometimes', 'required', 'string', 'max:255', Rule::unique('types_sortie', 'code')->ignore($this->route('id'))],
         ];
     }
 }

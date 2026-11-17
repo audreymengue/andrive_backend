@@ -44,7 +44,43 @@ return Application::configure(basePath: dirname(__DIR__))
                 return null;
             }
 
-            return response()->json(['message' => 'Non authentifié.', ...(($request->route('organisation_kind') || $request->route('treatment_api') || $request->route('resource_profile_kind') || $request->route('transport_api')) ? ['code' => 'UNAUTHENTICATED'] : [])], 401);
+            return response()->json(['message' => 'Non authentifié.', ...(($request->route('authentication_api') || $request->route('parametrage_api') || $request->route('organisation_kind') || $request->route('reference_catalog_api') || $request->route('treatment_api') || $request->route('resource_profile_kind') || $request->route('transport_api') || $request->route('notification_api')) ? ['code' => 'UNAUTHENTICATED'] : [])], 401);
+        });
+
+        $exceptions->render(function (ThrottleRequestsException $exception, Request $request): ?JsonResponse {
+            if (! $request->route('authentication_api')) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'Trop de tentatives. Réessayez plus tard.',
+                'code' => 'RATE_LIMITED',
+            ], 429, $exception->getHeaders());
+        });
+
+        $exceptions->render(function (HttpExceptionInterface $exception, Request $request): ?JsonResponse {
+            if (! $request->route('authentication_api')) {
+                return null;
+            }
+
+            $status = $exception->getStatusCode();
+            $code = match ($status) {
+                401 => 'UNAUTHENTICATED',
+                403 => 'FORBIDDEN',
+                503 => 'TEMPORARILY_UNAVAILABLE',
+                default => null,
+            };
+            if ($code === null) {
+                return null;
+            }
+
+            $message = $exception->getMessage() !== '' ? $exception->getMessage() : match ($status) {
+                401 => 'Non authentifié.',
+                403 => 'Vous n’avez pas la permission d’effectuer cette action.',
+                503 => 'Opération temporairement indisponible.',
+            };
+
+            return response()->json(['message' => $message, 'code' => $code], $status, $exception->getHeaders());
         });
 
         $exceptions->render(function (AuthorizationException|UnauthorizedException $exception, Request $request): ?JsonResponse {
@@ -52,7 +88,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 return null;
             }
 
-            return response()->json(['message' => 'Vous n’avez pas la permission d’effectuer cette action.', ...(($request->route('treatment_api') || $request->route('resource_profile_kind') || $request->route('transport_api')) ? ['code' => 'FORBIDDEN'] : [])], 403);
+            return response()->json(['message' => 'Vous n’avez pas la permission d’effectuer cette action.', ...(($request->route('reference_catalog_api') || $request->route('parametrage_api') || $request->route('treatment_api') || $request->route('resource_profile_kind') || $request->route('transport_api') || $request->route('notification_api')) ? ['code' => 'FORBIDDEN'] : [])], 403);
         });
 
         $exceptions->render(function (ValidationException $exception, Request $request): ?JsonResponse {
@@ -62,6 +98,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
             return response()->json([
                 'message' => 'Les données fournies sont invalides.',
+                ...(($request->route('reference_catalog_api') || $request->route('parametrage_api')) ? ['code' => 'VALIDATION_ERROR'] : []),
                 'errors' => $exception->errors(),
             ], 422);
         });
@@ -79,6 +116,6 @@ return Application::configure(basePath: dirname(__DIR__))
                 ? 'L’utilisateur demandé n’existe pas.'
                 : 'Ressource introuvable.';
 
-            return response()->json(['message' => $message, ...($request->route('organisation_kind') ? ['code' => 'NOT_FOUND'] : [])], 404);
+            return response()->json(['message' => $message, ...(($request->route('organisation_kind') || $request->route('reference_catalog_api') || $request->route('parametrage_api')) ? ['code' => 'NOT_FOUND'] : [])], 404);
         });
     })->create();

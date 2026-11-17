@@ -22,6 +22,14 @@ class TypeSortie extends Model
         'code',
     ];
 
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return ['lock_version' => 'integer'];
+    }
+
     public function demandes(): HasMany
     {
         return $this->hasMany(Demande::class);

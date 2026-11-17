@@ -485,12 +485,21 @@ class NetworkValidationTest extends TestCase
         $network = self::$network;
         $token = $network->activeAdminToken();
         $target = $network->accounts['user']['id'];
+        $invalidPayload = ['version_attendue' => 0, 'password_generation' => 1, 'motif' => 'TEST NET champ inattendu', 'current_password' => 'invalid-network-password', 'champ_inattendu' => 'valeur'];
+        $unknownField = $network->request('POST', '/api/users/'.$target.'/temporary-password/reveal', $invalidPayload, $token);
+        $this->assertSame(422, $unknownField['status']);
+        $this->assertSame('VALIDATION_ERROR', $unknownField['json']['code'] ?? null);
+
         $statuses = [];
         for ($i = 0; $i < 6; $i++) {
             $result = $network->request('POST', '/api/users/'.$target.'/temporary-password/reveal', ['version_attendue' => 0, 'password_generation' => 1, 'motif' => 'TEST NET refus reauthentification', 'current_password' => 'invalid-network-password'], $token);
             $statuses[] = $result['status'];
         }
-        $network->evidence['http_reauthentication'] = ['statuses' => $statuses, 'passed' => $statuses === [401, 401, 401, 401, 401, 429], 'cache_store' => config('cache.default')];
+        $retryAfter = (int) ($result['headers']['retry-after'] ?? 0);
+        $this->assertSame('TOO_MANY_ATTEMPTS', $result['json']['code'] ?? null);
+        $this->assertGreaterThanOrEqual(1, $retryAfter);
+        $this->assertLessThanOrEqual(60, $retryAfter);
+        $network->evidence['http_reauthentication'] = ['statuses' => $statuses, 'retry_after' => $retryAfter, 'unknown_field_status' => $unknownField['status'], 'passed' => $statuses === [401, 401, 401, 401, 401, 429], 'cache_store' => config('cache.default')];
         $network->saveEvidence();
         $this->assertSame([401, 401, 401, 401, 401, 429], $statuses, 'Les tentatives doivent etre conservees apres rollback de la transaction administrative.');
     }
@@ -509,9 +518,25 @@ class NetworkValidationTest extends TestCase
             $result = ['tests' => isset($matches[1]) ? (int) $matches[1] : null, 'assertions' => isset($matches[2]) ? (int) $matches[2] : null];
         }
         $network->evidence['parametrage_suite'] = ['exit_code' => $exit, 'tests' => $result['tests'] ?? null, 'assertions' => $result['assertions'] ?? null, 'failed' => $result['failed'] ?? 0, 'errors' => $result['errors'] ?? 0, 'failure_names' => array_column($result['failures'] ?? [], 'test'), 'error_names' => array_column($result['error_details'] ?? [], 'test')];
+        if ($exit !== 0) {
+            $diagnostic = $network->redactSensitiveText($output.$process->getErrorOutput());
+            if (preg_match('/(?:ERRORS!|FAILURES!)(.*?)(?:Tests: \d+|Time:)/s', $diagnostic, $matches) === 1) {
+                $network->evidence['parametrage_suite']['sanitized_diagnostic'] = mb_substr(trim($matches[1]), 0, 3000);
+            }
+            $network->evidence['parametrage_suite']['sanitized_errors'] = array_map(function (array $error) use ($network): array {
+                $safe = [];
+                foreach (['test', 'exception', 'class', 'message', 'file', 'line'] as $key) {
+                    if (isset($error[$key]) && is_scalar($error[$key])) {
+                        $safe[$key] = $network->redactSensitiveText((string) $error[$key]);
+                    }
+                }
+
+                return $safe;
+            }, $result['error_details'] ?? []);
+        }
         $network->saveEvidence();
         $this->assertSame(0, $exit, 'La suite Parametrage doit rester verte sur le serveur MySQL prive ; aucun payload sensible de diagnostic expose.');
-        $this->assertSame(233, $result['tests'] ?? null);
+        $this->assertSame(257, $result['tests'] ?? null);
         $this->assertTrue($network->logsContainNoSecrets());
     }
 }

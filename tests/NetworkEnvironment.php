@@ -344,6 +344,13 @@ final class NetworkEnvironment
         return true;
     }
 
+    public function redactSensitiveText(string $text): string
+    {
+        $text = str_replace($this->secrets, '[REDACTED]', $text);
+
+        return preg_replace('/((?:password|token|secret)[\'"\s:=]+)[^\s,;]+/i', '$1[REDACTED]', $text) ?? $text;
+    }
+
     public function saveEvidence(): void
     {
         file_put_contents($this->directory.'/evidence.json', json_encode($this->evidence, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
