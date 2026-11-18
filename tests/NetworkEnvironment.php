@@ -7,7 +7,10 @@ use App\Models\EntiteGeographique;
 use App\Models\Role;
 use App\Models\TypeSortie;
 use App\Models\User;
+use App\Services\PasswordService;
 use Database\Seeders\ParametrageSecuritySeeder;
+use Database\Seeders\PermissionSeeder;
+use Database\Seeders\QaRoleAccountsSeeder;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Hash;
 use PDO;
@@ -63,7 +66,7 @@ final class NetworkEnvironment
         $this->mysqlPort = self::freePort();
         $password = bin2hex(random_bytes(20));
         $key = 'base64:'.base64_encode(random_bytes(32));
-        $this->secrets = [$password, $key];
+        $this->secrets = [$password, $key, QaRoleAccountsSeeder::TEST_PASSWORD];
         $this->env = [
             'ANINF_VALIDATION_MYSQL_PORT' => (string) $this->mysqlPort,
             'ANINF_VALIDATION_RUN_ID' => $this->runId,
@@ -135,8 +138,10 @@ final class NetworkEnvironment
         $app->make(Kernel::class)->bootstrap();
         restore_error_handler();
         restore_exception_handler();
+        $app->make(PermissionSeeder::class)->run();
         $app->make(ParametrageSecuritySeeder::class)->run();
         $direction = Direction::factory()->create(['nom' => 'TEST NET organisation', 'code' => 'TEST_NET_'.$this->runId]);
+        $app->make(QaRoleAccountsSeeder::class)->run($app->make(PasswordService::class), $direction->id);
         $role = Role::where('system_key', 'super_admin')->firstOrFail();
         foreach (['a', 'b', 'user'] as $name) {
             $secret = bin2hex(random_bytes(6));
@@ -144,6 +149,14 @@ final class NetworkEnvironment
             $user->assignRole($name === 'user' ? Role::where('system_key', 'demandeur')->firstOrFail() : $role);
             $this->accounts[$name] = ['id' => $user->id, 'email' => $user->email, 'password' => $secret, 'token' => null];
             $this->secrets[] = $secret;
+        }
+        foreach ([
+            'qa_dag' => 'qa.dag@example.test',
+            'qa_chauffeur' => 'qa.chauffeur@example.test',
+            'qa_transport' => 'qa.transport@example.test',
+        ] as $name => $email) {
+            $user = User::query()->where('email', $email)->firstOrFail();
+            $this->accounts[$name] = ['id' => $user->id, 'email' => $email, 'password' => QaRoleAccountsSeeder::TEST_PASSWORD, 'token' => null];
         }
         $this->fixtures = ['direction' => $direction->id, 'type' => TypeSortie::factory()->create()->id, 'lieu' => EntiteGeographique::factory()->create()->id];
         foreach ([0, 1] as $index) {

@@ -130,6 +130,40 @@ class NetworkValidationTest extends TestCase
         $network->saveEvidence();
     }
 
+    public function test_seeded_qa_accounts_log_in_and_return_their_roles_over_real_http(): void
+    {
+        $network = self::$network;
+        $profiles = [
+            'qa_dag' => ['role' => 'dag', 'permission' => 'read_demande_traitement', 'path' => '/api/traitement/demandes'],
+            'qa_chauffeur' => ['role' => 'chauffeur', 'permission' => 'read_course', 'path' => '/api/courses'],
+            'qa_transport' => ['role' => 'gestionnaire_transport', 'permission' => 'read_transport_signalement', 'path' => '/api/transport/signalements'],
+        ];
+
+        foreach ($profiles as $accountName => $expected) {
+            $login = $network->login($accountName);
+            $this->expectHttpCode(200, $login, 'Login HTTP '.$expected['role']);
+            $token = $login['json']['data']['token'];
+            $profile = $network->request('GET', '/api/me', token: $token);
+            $this->expectHttpCode(200, $profile, 'Profil HTTP '.$expected['role']);
+            $roleNames = array_column($profile['json']['data']['roles'], 'nom');
+            $this->assertSame([$expected['role']], $roleNames);
+            $this->assertContains($expected['permission'], $profile['json']['data']['permissions_effectives']);
+
+            $authorized = $network->request('GET', $expected['path'], token: $token);
+            $this->expectHttpCode(200, $authorized, 'Accès HTTP '.$expected['role']);
+            $network->evidence['qa_accounts_http'][$accountName] = [
+                'login_status' => $login['status'],
+                'profile_status' => $profile['status'],
+                'role' => $expected['role'],
+                'authorized_route_status' => $authorized['status'],
+            ];
+        }
+
+        $network->evidence['qa_accounts_http']['passed'] = $network->logsContainNoSecrets();
+        $this->assertTrue($network->logsContainNoSecrets(), 'Les identifiants et tokens QA ne doivent pas apparaître dans les logs.');
+        $network->saveEvidence();
+    }
+
     private function simultaneous(array $race, string $name): void
     {
         $this->assertSame(2, $race['simultaneous_mysql_waiters'], $name.' : deux connexions distinctes doivent attendre simultanement la garde MySQL du scenario.');

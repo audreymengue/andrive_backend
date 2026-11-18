@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Models\Direction;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Str;
 
 /**
  * @extends Factory<Direction>
@@ -19,7 +20,7 @@ class DirectionFactory extends Factory
     {
         return [
             'nom' => fake()->company(),
-            'code' => fake()->unique()->bothify('DIR-###'),
+            'code' => 'DIR-'.Str::upper(Str::random(12)),
             'description' => fake()->sentence(),
             'statut' => 'ACTIF',
         ];

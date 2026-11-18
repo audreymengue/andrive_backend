@@ -68,9 +68,10 @@ frontend n'est nécessaire pour tester cette API.
    Sur `aninf_test`, `DatabaseSeeder` appelle `TestDataSeeder`, qui exécute
    `PermissionSeeder` → `RoleSeeder` → `AdminUserSeeder`, puis les directions,
    comptes de démonstration, références géographiques et demandes de test.
-   Il crée 29 permissions, 2 rôles, 6 comptes, 3 directions, le seul type
-   `TEST_SORTIE`, 7 entités géographiques, 12 demandes, leurs historiques et
-   une modification. Aucune valeur métier de type de sortie n'est préinstallée.
+   Il crée 67 permissions, 5 rôles, 9 comptes de test, 3 directions, le seul
+   type `TEST_SORTIE`, 7 entités géographiques, 12 demandes, leurs historiques,
+   une modification et un profil chauffeur QA. Aucune valeur métier de type de
+   sortie n'est préinstallée.
 
 8. Exécuter toute la suite de tests :
 
@@ -101,12 +102,31 @@ frontend n'est nécessaire pour tester cette API.
 | Demandeur 2 | `demandeur2@aninf.ga` | `TestPass3!` |
 | Demandeur 3 | `demandeur3@aninf.ga` | `TestPass4!` |
 | Compte inactif | `inactif-test@aninf.ga` | `TestPass5!` |
+| Opérateur DAG QA | `qa.dag@example.test` | `ANINF-QA26` |
+| Chauffeur QA | `qa.chauffeur@example.test` | `ANINF-QA26` |
+| Gestionnaire Transport QA | `qa.transport@example.test` | `ANINF-QA26` |
 
 Ces identifiants de démonstration sont réservés à `aninf_test` et ne doivent
-jamais être réutilisés en production. Les cinq comptes de test ne nécessitent
+jamais être réutilisés en production. Les huit comptes QA actifs ne nécessitent
 pas de changement initial de mot de passe ; le compte inactif permet de tester
-le refus de connexion. `admin-test@aninf.ga` dispose de toutes les permissions.
-Les demandeurs peuvent consulter et gérer leurs propres demandes.
+le refus de connexion. Les comptes DAG, chauffeur et gestion Transport ont
+uniquement les permissions de leurs parcours de test ; le compte chauffeur est
+lié à un profil chauffeur actif. Le rôle `super_admin` reste réservé aux tests
+d’administration. Les demandeurs peuvent consulter et gérer leurs demandes.
+
+Pour recréer ou synchroniser uniquement les trois rôles et comptes QA sur une
+base de test déjà initialisée, vérifier d’abord la base puis lancer :
+
+```powershell
+php artisan config:show database.connections.mysql.database
+php artisan db:seed --class=QaRoleAccountsSeeder --no-interaction
+```
+
+La première commande doit afficher `aninf_test`. Le seeder dédié refuse toute
+autre base et ne supprime pas les données existantes. Il rattache les comptes à
+la DSI si elle est active, sinon à la première direction active existante ; il
+ne crée aucune direction. Sur une installation neuve, `php artisan migrate
+--seed` crée déjà ces comptes.
 
 L'administrateur initial doit définir son premier mot de passe via
 `PUT /api/me/password` avant d'accéder aux endpoints métier. Le temporaire

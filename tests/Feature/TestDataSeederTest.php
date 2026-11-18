@@ -12,6 +12,7 @@ use App\Models\Role;
 use App\Models\TypeSortie;
 use App\Models\User;
 use App\Services\ParametrageSecurity;
+use Database\Seeders\QaRoleAccountsSeeder;
 use Database\Seeders\TestDataSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Hash;
@@ -39,6 +40,37 @@ class TestDataSeederTest extends TestCase
     }
 
     #[Test]
+    public function it_refuses_to_seed_qa_accounts_when_the_mysql_database_is_not_aninf_test(): void
+    {
+        config()->set('database.connections.mysql.database', 'aninf');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Le seeder des comptes QA ne peut être exécuté que sur la base aninf_test.');
+
+        $this->seed(QaRoleAccountsSeeder::class);
+    }
+
+    #[Test]
+    public function it_uses_an_existing_active_direction_when_dsi_is_inactive(): void
+    {
+        config()->set('database.connections.mysql.database', TestDataSeeder::TEST_DATABASE);
+        Direction::factory()->create(['code' => 'DSI', 'statut' => 'INACTIF']);
+        $activeDirection = Direction::factory()->create(['code' => 'DAF', 'statut' => 'ACTIF']);
+        $existingQaUser = User::factory()->create([
+            'email' => 'qa.dag@example.test',
+            'direction_id' => null,
+        ]);
+
+        $this->seed(QaRoleAccountsSeeder::class);
+
+        $this->assertSame($existingQaUser->id, User::query()->where('email', 'qa.dag@example.test')->value('id'));
+        $this->assertDatabaseHas('users', [
+            'email' => 'qa.dag@example.test',
+            'direction_id' => $activeDirection->id,
+        ]);
+    }
+
+    #[Test]
     public function it_creates_an_idempotent_and_coherent_test_data_set(): void
     {
         $this->travelTo('2026-09-29 09:00:00');
@@ -51,14 +83,14 @@ class TestDataSeederTest extends TestCase
         $this->assertDatabaseHas('directions', ['nom' => 'Direction Administrative et Financière', 'code' => 'DAF', 'statut' => 'ACTIF']);
         $this->assertDatabaseHas('directions', ['nom' => 'Direction des Ressources Humaines', 'code' => 'DRH', 'statut' => 'ACTIF']);
 
-        $this->assertSame(6, User::query()->count());
+        $this->assertSame(9, User::query()->count());
         $this->assertDatabaseHas('users', ['email' => 'demandeur1@aninf.ga', 'direction_id' => Direction::query()->where('code', 'DSI')->value('id'), 'must_change_password' => false]);
         $this->assertDatabaseHas('users', ['email' => 'demandeur2@aninf.ga', 'direction_id' => Direction::query()->where('code', 'DAF')->value('id'), 'must_change_password' => false]);
         $this->assertDatabaseHas('users', ['email' => 'demandeur3@aninf.ga', 'direction_id' => Direction::query()->where('code', 'DRH')->value('id'), 'must_change_password' => false]);
         $this->assertDatabaseHas('users', ['email' => 'inactif-test@aninf.ga', 'statut' => 'INACTIF']);
         $this->assertTrue(Hash::check('TestPass1!', User::query()->where('email', 'admin-test@aninf.ga')->value('password')));
 
-        $this->assertSame(2, Role::query()->count());
+        $this->assertSame(5, Role::query()->count());
         $this->assertSame(67, Permission::query()->count());
         $this->assertTrue(User::query()->where('email', 'admin-test@aninf.ga')->firstOrFail()->hasRole('super_admin'));
         $this->assertTrue(User::query()->where('email', 'demandeur1@aninf.ga')->firstOrFail()->hasRole('demandeur'));
@@ -73,6 +105,32 @@ class TestDataSeederTest extends TestCase
             'submit_demande',
             'update_demande',
         ], Role::query()->where('name', 'demandeur')->firstOrFail()->permissions()->pluck('name')->sort()->values()->all());
+
+        $expectedPermissions = [
+            'dag' => ['confirm_course', 'create_course', 'read_course', 'read_demande_traitement', 'read_driver', 'read_vehicle', 'update_course'],
+            'chauffeur' => ['finish_course', 'read_course', 'report_course_incident', 'start_course'],
+            'gestionnaire_transport' => ['confirm_resource_return', 'manage_resource_availability', 'read_driver', 'read_resource_availability', 'read_transport_signalement', 'read_vehicle'],
+        ];
+
+        foreach ($expectedPermissions as $roleName => $permissions) {
+            $this->assertSame($permissions, Role::query()->where('name', $roleName)->firstOrFail()->permissions()->pluck('name')->sort()->values()->all());
+        }
+
+        foreach ([
+            'qa.dag@example.test' => 'dag',
+            'qa.chauffeur@example.test' => 'chauffeur',
+            'qa.transport@example.test' => 'gestionnaire_transport',
+        ] as $email => $roleName) {
+            $user = User::query()->where('email', $email)->firstOrFail();
+            $this->assertSame('ACTIF', $user->statut);
+            $this->assertFalse($user->must_change_password);
+            $this->assertTrue($user->hasRole($roleName));
+            $this->assertSame(Direction::query()->where('code', 'DSI')->value('id'), $user->direction_id);
+            $this->assertTrue(Hash::check(QaRoleAccountsSeeder::TEST_PASSWORD, $user->password));
+        }
+
+        $chauffeurUser = User::query()->where('email', 'qa.chauffeur@example.test')->firstOrFail();
+        $this->assertDatabaseHas('chauffeurs', ['user_id' => $chauffeurUser->id, 'statut' => 'ACTIF']);
 
         $this->assertSame(12, Demande::query()->count());
         $this->assertSame(3, Demande::query()->where('statut', Demande::STATUT_BROUILLON)->count());
@@ -140,7 +198,7 @@ class TestDataSeederTest extends TestCase
     {
         $this->seedTestData();
 
-        $this->assertDatabaseCount('users', 6);
+        $this->assertDatabaseCount('users', 9);
         foreach (User::query()->with('direction')->get() as $user) {
             $this->assertNotNull($user->direction, 'Chaque nouveau compte de test exige un rattachement valide.');
             $this->assertSame('ACTIF', $user->direction->statut);
@@ -161,7 +219,7 @@ class TestDataSeederTest extends TestCase
 
         $this->assertSame($direction->id, $initialAdmin->direction_id);
         $this->assertSame(3, Direction::query()->count());
-        $this->assertSame(6, User::query()->count());
+        $this->assertSame(9, User::query()->count());
     }
 
     #[Test]

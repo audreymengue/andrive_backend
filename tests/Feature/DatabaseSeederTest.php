@@ -34,8 +34,8 @@ class DatabaseSeederTest extends TestCase
         foreach (['read_user', 'assign_permission', 'read_demande', 'create_demande', 'submit_demande', 'read_type_sortie', 'read_entite_geographique'] as $permission) {
             $this->assertDatabaseHas('permissions', ['name' => $permission, 'guard_name' => 'web']);
         }
-        $this->assertDatabaseCount('roles', 2);
-        $this->assertDatabaseCount('users', 6);
+        $this->assertDatabaseCount('roles', 5);
+        $this->assertDatabaseCount('users', 9);
         $admin = User::query()->where('email', 'admin@aninf.ga')->firstOrFail();
         $this->assertTrue(Hash::check('Initial1!', $admin->password));
         $this->assertTrue($admin->must_change_password);
@@ -45,6 +45,13 @@ class DatabaseSeederTest extends TestCase
         foreach (['admin-test@aninf.ga', 'demandeur1@aninf.ga', 'demandeur2@aninf.ga', 'demandeur3@aninf.ga', 'inactif-test@aninf.ga'] as $email) {
             $this->assertDatabaseHas('users', ['email' => $email, 'must_change_password' => false]);
         }
+        foreach (['qa.dag@example.test', 'qa.chauffeur@example.test', 'qa.transport@example.test'] as $email) {
+            $this->assertDatabaseHas('users', ['email' => $email, 'statut' => 'ACTIF', 'must_change_password' => false]);
+        }
+        $this->assertDatabaseHas('chauffeurs', [
+            'user_id' => User::query()->where('email', 'qa.chauffeur@example.test')->value('id'),
+            'statut' => 'ACTIF',
+        ]);
         $this->assertTrue(Hash::check('TestPass1!', User::query()->where('email', 'admin-test@aninf.ga')->firstOrFail()->password));
         $this->assertDatabaseCount('directions', 4);
         $this->assertDatabaseCount('types_sortie', 1);

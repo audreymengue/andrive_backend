@@ -44,6 +44,7 @@ class TestDataSeeder extends Seeder
             $this->call(AdminUserSeeder::class);
 
             $users = $this->seedUsers($directions, $passwordService);
+            $this->callWith(QaRoleAccountsSeeder::class, ['directionId' => $directions['dsi']->id]);
             $this->seedDemandes($directions, $users);
             app(ParametrageSecurity::class)->assertAdministratorRemains();
         });
