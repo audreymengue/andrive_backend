@@ -60,7 +60,7 @@ class ParametrageAuditResource extends JsonResource
             'permission' => ['id' => 'integer', 'name' => 'string', 'libelle' => 'string', 'description' => 'string', 'lock_version' => 'integer'],
             'direction' => ['id' => 'integer', 'nom' => 'string', 'code' => 'string', 'description' => 'string', 'statut' => 'string', 'lock_version' => 'integer'],
             'service' => ['id' => 'integer', 'direction_id' => 'integer', 'nom' => 'string', 'code' => 'string', 'description' => 'string', 'statut' => 'string', 'lock_version' => 'integer'],
-            'vehicule' => ['id' => 'integer', 'immatriculation' => 'string', 'places_utiles' => 'integer', 'statut' => 'string', 'lock_version' => 'integer'],
+            'vehicule' => ['id' => 'integer', 'immatriculation' => 'string', 'marque' => 'string', 'modele' => 'string', 'places_utiles' => 'integer', 'statut' => 'string', 'lock_version' => 'integer'],
             'chauffeur' => ['id' => 'integer', 'user_id' => 'integer', 'statut' => 'string', 'lock_version' => 'integer'],
             default => [],
         };

@@ -46,6 +46,15 @@ class ResourceProfileRequest extends ApiFormRequest
 
         $rules = ['idempotency_key' => ['required', 'uuid']];
 
+        if (in_array($action, ['create', 'update'], true)) {
+            $rules += $kind === 'vehicule' ? [
+                'marque' => ['sometimes', 'nullable', 'string', 'max:255'],
+                'modele' => ['sometimes', 'nullable', 'string', 'max:255'],
+            ] : [
+                'telephone' => ['sometimes', 'nullable', 'string', 'max:32', 'regex:/^\+?(?=[0-9 ().-]*[0-9])[0-9 ().-]+$/D'],
+            ];
+        }
+
         if ($action === 'create' && $kind === 'vehicule') {
             return $rules + [
                 'immatriculation' => ['required', 'string', 'min:1', 'max:255'],

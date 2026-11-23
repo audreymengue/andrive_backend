@@ -148,7 +148,7 @@ class ResourceProfileService
                 $this->fail(409, 'RESOURCE_CONFLICT', 'Une immatriculation ou un compte chauffeur est déjà associé à une autre ressource.');
             }
 
-            report($exception);
+            report(new \RuntimeException('Échec de stockage du profil de ressource (SQLSTATE '.$exception->getCode().').'));
             $this->fail(503, 'TEMPORARILY_UNAVAILABLE', 'Opération temporairement indisponible ; aucun changement partiel validé.');
         }
     }
@@ -158,6 +158,8 @@ class ResourceProfileService
         if ($kind === 'vehicule') {
             $model->fill([
                 'immatriculation' => $data['immatriculation'],
+                'marque' => $data['marque'] ?? null,
+                'modele' => $data['modele'] ?? null,
                 'places_utiles' => $data['places_utiles'],
                 'statut' => 'ACTIF',
             ]);
@@ -170,13 +172,13 @@ class ResourceProfileService
             $this->assertUserExists((int) $userId);
             $this->assertUserNotLinked((int) $userId);
         }
-        $model->fill(['user_id' => $userId, 'statut' => 'ACTIF']);
+        $model->fill(['user_id' => $userId, 'telephone' => $data['telephone'] ?? null, 'statut' => 'ACTIF']);
     }
 
     private function updateProfile(Model $model, string $kind, array $data): void
     {
         if ($kind === 'vehicule') {
-            $model->fill(array_intersect_key($data, array_flip(['immatriculation', 'places_utiles'])));
+            $model->fill(array_intersect_key($data, array_flip(['immatriculation', 'marque', 'modele', 'places_utiles'])));
 
             return;
         }
@@ -187,6 +189,9 @@ class ResourceProfileService
                 $this->assertUserNotLinked((int) $data['user_id'], (int) $model->id);
             }
             $model->user_id = $data['user_id'];
+        }
+        if (array_key_exists('telephone', $data)) {
+            $model->telephone = $data['telephone'];
         }
     }
 
@@ -242,6 +247,8 @@ class ResourceProfileService
             return [
                 'id' => (int) $model->id,
                 'immatriculation' => $model->immatriculation,
+                'marque' => $model->marque,
+                'modele' => $model->modele,
                 'places_utiles' => (int) $model->places_utiles,
                 'statut' => $model->statut,
                 'lock_version' => (int) $model->lock_version,

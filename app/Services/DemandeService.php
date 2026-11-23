@@ -8,6 +8,7 @@ use App\Models\DemandeReferenceSequence;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -118,7 +119,26 @@ class DemandeService
 
     public function find(User $user, int $id): Demande
     {
-        $demande = $this->detailQuery()->findOrFail($id);
+        $telephone = DB::table('course_preparation_demandes as affectation')
+            ->join('course_preparations as preparation', 'preparation.id', '=', 'affectation.course_preparation_id')
+            ->join('courses', 'courses.id', '=', 'preparation.course_id')
+            ->join('chauffeurs', 'chauffeurs.id', '=', 'preparation.chauffeur_id')
+            ->whereColumn('affectation.demande_id', 'demandes.id')
+            ->where('demandes.demandeur_id', $user->id)
+            ->whereIn('demandes.statut', [Demande::STATUT_VALIDEE, Demande::STATUT_REVALIDATION_REQUISE])
+            ->whereIn('courses.statut_execution', ['A_VENIR', 'EN_COURS'])
+            ->whereNotExists(function (QueryBuilder $query): void {
+                $query->selectRaw('1')->from('course_preparations as suivante')
+                    ->whereColumn('suivante.course_id', 'preparation.course_id')
+                    ->whereColumn('suivante.version', '>', 'preparation.version');
+            })
+            ->orderByDesc('courses.id')
+            ->limit(1)
+            ->select('chauffeurs.telephone');
+
+        $demande = $this->detailQuery()
+            ->addSelect(['chauffeur_telephone' => $telephone])
+            ->findOrFail($id);
 
         $this->ensureCanRead($user, $demande);
 

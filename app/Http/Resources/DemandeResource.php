@@ -17,6 +17,7 @@ class DemandeResource extends JsonResource
         return [
             'id' => $this->id,
             'reference' => $this->reference,
+            'chauffeur_telephone' => $this->whenHas('chauffeur_telephone'),
             'demandeur' => $this->whenLoaded('demandeur', fn (): array => [
                 'id' => $this->demandeur->id,
                 'nom' => $this->demandeur->nom,

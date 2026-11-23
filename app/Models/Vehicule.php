@@ -13,7 +13,7 @@ class Vehicule extends Model
 
     protected $table = 'vehicules';
 
-    protected $fillable = ['immatriculation', 'places_utiles', 'statut'];
+    protected $fillable = ['immatriculation', 'marque', 'modele', 'places_utiles', 'statut'];
 
     protected function casts(): array
     {

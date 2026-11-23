@@ -9,9 +9,11 @@ use App\Models\DemandeEmploye;
 use App\Models\DemandeObjet;
 use App\Models\Direction;
 use App\Models\Permission;
+use App\Models\Role;
 use App\Models\Service;
 use App\Models\User;
 use App\Models\Vehicule;
+use Database\Seeders\ParametrageSecuritySeeder;
 use Database\Seeders\PermissionSeeder;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -360,6 +362,58 @@ class TreatmentCourseApiTest extends TestCase
             ->assertConflict()->assertJsonPath('code', 'RESOURCE_NOT_ELIGIBLE');
         $this->assertSame(1, $course['version_preparation']);
         $this->assertSame(0, DB::table('course_events')->where('course_id', $course['id'])->where('action', 'preparation_updated')->count());
+    }
+
+    public function test_only_the_request_owner_sees_the_confirmed_current_driver_phone_in_the_detail(): void
+    {
+        $dag = $this->userWith(['create_course', 'update_course', 'confirm_course', 'read_course']);
+        $owner = $this->userWith('read_demande');
+        $other = $this->userWith('read_demande');
+        $phone = '+1 202-555-0119';
+        $driver = Chauffeur::factory()->create(['user_id' => User::factory(), 'statut' => 'ACTIF', 'telephone' => $phone]);
+        $vehicle = Vehicule::factory()->create(['statut' => 'ACTIF']);
+        $demand = Demande::factory()->create(['demandeur_id' => $owner->id, 'statut' => Demande::STATUT_EN_ATTENTE]);
+        $removed = Demande::factory()->create(['demandeur_id' => $owner->id, 'statut' => Demande::STATUT_EN_ATTENTE]);
+        $this->authenticate($dag);
+        $course = $this->createReadyCourse($removed, $driver, $vehicle);
+        $courseUri = '/api/courses/'.$course['id'];
+        $this->putJson($courseUri, ['version_attendue' => 1, 'demande_ids' => [$demand->id]],
+            ['Idempotency-Key' => (string) Str::uuid()])->assertOk();
+        $detail = '/api/demandes/'.$demand->id;
+
+        $this->authenticate($owner);
+        $this->getJson($detail)->assertOk()->assertJsonStructure(['data' => ['chauffeur_telephone']])
+            ->assertJsonPath('data.chauffeur_telephone', null);
+        $this->authenticate($dag);
+        $this->postJson($courseUri, ['version_attendue' => 2, 'motif' => 'Affectation de test'],
+            ['Idempotency-Key' => (string) Str::uuid()])->assertOk()->assertDontSee($phone);
+        $this->getJson($courseUri)->assertOk()->assertDontSee($phone);
+        $this->getJson('/api/courses?per_page=1')->assertOk()->assertJsonPath('data.0.id', $course['id'])->assertDontSee($phone);
+
+        $this->authenticate($owner);
+        $this->getJson($detail)->assertOk()->assertJsonPath('data.chauffeur_telephone', $phone);
+        $this->getJson('/api/demandes?reference='.$demand->reference)->assertOk()->assertJsonPath('data.0.id', $demand->id)
+            ->assertJsonMissingPath('data.0.chauffeur_telephone')->assertDontSee($phone);
+        $this->getJson('/api/demandes/'.$removed->id)->assertOk()->assertJsonPath('data.chauffeur_telephone', null);
+        $this->authenticate($other);
+        $this->getJson($detail)->assertForbidden()->assertDontSee($phone);
+        $this->seed(ParametrageSecuritySeeder::class);
+        $other->assignRole(Role::query()->where('system_key', 'super_admin')->firstOrFail());
+        $this->authenticate($other);
+        $this->getJson($detail)->assertOk()->assertDontSee($phone);
+
+        $this->authenticate($owner);
+        $confirmed = Course::query()->findOrFail($course['id']);
+        $confirmed->update(['statut_execution' => 'EN_COURS']);
+        $this->getJson($detail)->assertOk()->assertJsonPath('data.chauffeur_telephone', $phone);
+        $driver->update(['telephone' => null]);
+        $this->getJson($detail)->assertOk()->assertJsonPath('data.chauffeur_telephone', null);
+        $driver->update(['telephone' => $phone]);
+        $demand->update(['statut' => Demande::STATUT_ANNULEE]);
+        $this->getJson($detail)->assertOk()->assertJsonPath('data.chauffeur_telephone', null);
+        $demand->update(['statut' => Demande::STATUT_VALIDEE]);
+        $confirmed->update(['statut_execution' => 'TERMINEE']);
+        $this->getJson($detail)->assertOk()->assertJsonPath('data.chauffeur_telephone', null);
     }
 
     public function test_confirmed_course_can_only_be_started_and_finished_by_its_assigned_driver(): void

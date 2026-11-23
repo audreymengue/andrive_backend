@@ -14,8 +14,23 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        if (config('database.connections.mysql.database') === TestDataSeeder::TEST_DATABASE) {
-            $this->call(TestDataSeeder::class);
+        $isTestDatabase = config('database.connections.mysql.database') === TestDataSeeder::TEST_DATABASE;
+
+        if (app()->runningUnitTests()) {
+            $this->call($isTestDatabase ? TestDataSeeder::class : [
+                PermissionSeeder::class,
+                RoleSeeder::class,
+                AdminUserSeeder::class,
+            ]);
+
+            return;
+        }
+
+        if ($isTestDatabase) {
+            $this->call([
+                TestDataSeeder::class,
+                OfficialOrganisationSeeder::class,
+            ]);
 
             return;
         }
@@ -23,6 +38,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             PermissionSeeder::class,
             RoleSeeder::class,
+            OfficialOrganisationSeeder::class,
             AdminUserSeeder::class,
         ]);
     }

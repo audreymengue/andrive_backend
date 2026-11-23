@@ -73,7 +73,7 @@ class DemandeController extends Controller
         return $this->demandeResponse(
             $this->demandeService->find($user, $id),
             'Demande récupérée avec succès.',
-        );
+        )->header('Cache-Control', 'private, no-store');
     }
 
     public function update(UpdateDemandeRequest $request, int $id): JsonResponse

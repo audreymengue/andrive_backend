@@ -2667,7 +2667,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DemandeResponse'
+                $ref: '#/components/schemas/DemandeDetailResponse'
         '401':
           description: Non authentifié
         '403':
@@ -8250,6 +8250,27 @@ components:
           example: Demande récupérée avec succès.
         data:
           $ref: '#/components/schemas/Demande'
+    DemandeDetailResponse:
+      type: object
+      required:
+      - message
+      - data
+      properties:
+        message:
+          type: string
+        data:
+          allOf:
+          - $ref: '#/components/schemas/Demande'
+          - type: object
+            required:
+            - chauffeur_telephone
+            properties:
+              chauffeur_telephone:
+                type: string
+                maxLength: 32
+                nullable: true
+                readOnly: true
+                description: Numéro du chauffeur affecté à cette demande, visible par son demandeur pendant une course confirmée à venir ou en cours. Null en dehors de cette période, si la demande est annulée, pour tout autre lecteur habilité, ou si le numéro est absent.
     DemandeListResponse:
       type: object
       required:
@@ -9001,6 +9022,7 @@ components:
           maxLength: 1000
     ParamVehicle:
       type: object
+      description: Les lectures et les nouvelles écritures incluent marque et modele. Une commande rejouée peut restituer une ancienne réponse où ces deux champs sont absents.
       additionalProperties: false
       required:
       - id
@@ -9017,6 +9039,14 @@ components:
           type: string
           minLength: 1
           maxLength: 255
+        marque:
+          type: string
+          maxLength: 255
+          nullable: true
+        modele:
+          type: string
+          maxLength: 255
+          nullable: true
         places_utiles:
           type: integer
           minimum: 1
@@ -9040,6 +9070,14 @@ components:
           type: string
           minLength: 1
           maxLength: 255
+        marque:
+          type: string
+          maxLength: 255
+          nullable: true
+        modele:
+          type: string
+          maxLength: 255
+          nullable: true
         places_utiles:
           type: integer
           minimum: 1
@@ -9053,6 +9091,14 @@ components:
           type: string
           minLength: 1
           maxLength: 255
+        marque:
+          type: string
+          maxLength: 255
+          nullable: true
+        modele:
+          type: string
+          maxLength: 255
+          nullable: true
         places_utiles:
           type: integer
           minimum: 1
@@ -9122,6 +9168,13 @@ components:
       type: object
       additionalProperties: false
       properties:
+        telephone:
+          type: string
+          maxLength: 32
+          nullable: true
+          writeOnly: true
+          pattern: '^\+?(?=[0-9 ().-]*[0-9])[0-9 ().-]+$'
+          description: Numéro de contact du chauffeur. Une mise à jour conserve la valeur si le champ est omis et l’efface si sa valeur est null.
         user_id:
           type: integer
           format: int64
@@ -9133,6 +9186,13 @@ components:
       required:
       - version_attendue
       properties:
+        telephone:
+          type: string
+          maxLength: 32
+          nullable: true
+          writeOnly: true
+          pattern: '^\+?(?=[0-9 ().-]*[0-9])[0-9 ().-]+$'
+          description: Numéro de contact du chauffeur. Une mise à jour conserve la valeur si le champ est omis et l’efface si sa valeur est null.
         user_id:
           type: integer
           format: int64
@@ -12883,7 +12943,7 @@ x-current-contract:
             content:
               application/json:
                 schema:
-                  $ref: '#/components/schemas/DemandeResponse'
+                  $ref: '#/components/schemas/DemandeDetailResponse'
           '401':
             description: Non authentifié
           '403':
@@ -18246,6 +18306,27 @@ x-current-contract:
             example: Demande récupérée avec succès.
           data:
             $ref: '#/components/schemas/Demande'
+      DemandeDetailResponse:
+        type: object
+        required:
+        - message
+        - data
+        properties:
+          message:
+            type: string
+          data:
+            allOf:
+            - $ref: '#/components/schemas/Demande'
+            - type: object
+              required:
+              - chauffeur_telephone
+              properties:
+                chauffeur_telephone:
+                  type: string
+                  maxLength: 32
+                  nullable: true
+                  readOnly: true
+                  description: Numéro du chauffeur affecté à cette demande, visible par son demandeur pendant une course confirmée à venir ou en cours. Null en dehors de cette période, si la demande est annulée, pour tout autre lecteur habilité, ou si le numéro est absent.
       DemandeListResponse:
         type: object
         required:
@@ -19005,6 +19086,7 @@ x-current-contract:
             maxLength: 1000
       ParamVehicle:
         type: object
+        description: Les lectures et les nouvelles écritures incluent marque et modele. Une commande rejouée peut restituer une ancienne réponse où ces deux champs sont absents.
         additionalProperties: false
         required:
         - id
@@ -19021,6 +19103,14 @@ x-current-contract:
             type: string
             minLength: 1
             maxLength: 255
+          marque:
+            type: string
+            maxLength: 255
+            nullable: true
+          modele:
+            type: string
+            maxLength: 255
+            nullable: true
           places_utiles:
             type: integer
             minimum: 1
@@ -19044,6 +19134,14 @@ x-current-contract:
             type: string
             minLength: 1
             maxLength: 255
+          marque:
+            type: string
+            maxLength: 255
+            nullable: true
+          modele:
+            type: string
+            maxLength: 255
+            nullable: true
           places_utiles:
             type: integer
             minimum: 1
@@ -19057,6 +19155,14 @@ x-current-contract:
             type: string
             minLength: 1
             maxLength: 255
+          marque:
+            type: string
+            maxLength: 255
+            nullable: true
+          modele:
+            type: string
+            maxLength: 255
+            nullable: true
           places_utiles:
             type: integer
             minimum: 1
@@ -19126,6 +19232,13 @@ x-current-contract:
         type: object
         additionalProperties: false
         properties:
+          telephone:
+            type: string
+            maxLength: 32
+            nullable: true
+            writeOnly: true
+            pattern: '^\+?(?=[0-9 ().-]*[0-9])[0-9 ().-]+$'
+            description: Numéro de contact du chauffeur. Une mise à jour conserve la valeur si le champ est omis et l’efface si sa valeur est null.
           user_id:
             type: integer
             format: int64
@@ -19137,6 +19250,13 @@ x-current-contract:
         required:
         - version_attendue
         properties:
+          telephone:
+            type: string
+            maxLength: 32
+            nullable: true
+            writeOnly: true
+            pattern: '^\+?(?=[0-9 ().-]*[0-9])[0-9 ().-]+$'
+            description: Numéro de contact du chauffeur. Une mise à jour conserve la valeur si le champ est omis et l’efface si sa valeur est null.
           user_id:
             type: integer
             format: int64

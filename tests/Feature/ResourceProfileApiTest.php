@@ -47,7 +47,8 @@ class ResourceProfileApiTest extends TestCase
             ->assertJsonPath('data.statut', 'ACTIF')
             ->assertJsonPath('data.lock_version', 0);
         $id = $created->json('data.id');
-        $this->assertSame(['id', 'immatriculation', 'places_utiles', 'statut', 'lock_version'], array_keys($created->json('data')));
+        $this->assertEqualsCanonicalizing(['id', 'immatriculation', 'marque', 'modele', 'places_utiles', 'statut', 'lock_version'], array_keys($created->json('data')));
+        $created->assertJsonPath('data.marque', null)->assertJsonPath('data.modele', null);
         $this->assertDatabaseHas('vehicules', ['id' => $id, 'immatriculation' => 'TEST-RESOURCE-001', 'places_utiles' => 6]);
 
         $this->getJson('/api/parametrage/vehicules/'.$id)->assertOk()->assertJsonPath('data.id', $id);
@@ -107,6 +108,61 @@ class ResourceProfileApiTest extends TestCase
         $this->command('POST', '/api/parametrage/vehicules', ['immatriculation' => 'TEST-IDEMPOTENT-2', 'places_utiles' => 4], $key)
             ->assertConflict()->assertJsonPath('code', 'IDEMPOTENCY_CONFLICT');
         $this->assertSame(1, DB::table('organisation_commands')->where('command_key', $key)->count());
+    }
+
+    public function test_vehicle_make_and_model_can_be_set_read_updated_and_cleared(): void
+    {
+        $this->admin();
+        $payload = ['immatriculation' => 'TEST-MARQUE-001', 'places_utiles' => 4, 'marque' => 'Marque A', 'modele' => 'Modèle 1'];
+        $id = $this->command('POST', '/api/parametrage/vehicules', $payload)->assertCreated()
+            ->assertJsonPath('data.marque', 'Marque A')->assertJsonPath('data.modele', 'Modèle 1')->json('data.id');
+        $uri = '/api/parametrage/vehicules/'.$id;
+        $this->getJson('/api/parametrage/vehicules?search=TEST-MARQUE-001')->assertOk()
+            ->assertJsonPath('data.0.marque', 'Marque A')->assertJsonPath('data.0.modele', 'Modèle 1');
+        $this->command('PUT', $uri, ['version_attendue' => 0, 'modele' => 'Modèle 2'])
+            ->assertOk()->assertJsonPath('data.lock_version', 1);
+        $this->getJson($uri)->assertOk()->assertJsonPath('data.marque', 'Marque A')->assertJsonPath('data.modele', 'Modèle 2');
+        $this->command('PUT', $uri, ['version_attendue' => 1, 'marque' => ['invalide'], 'modele' => str_repeat('x', 256)])
+            ->assertUnprocessable()->assertJsonValidationErrors(['marque', 'modele']);
+        $this->command('PUT', $uri, ['version_attendue' => 1, 'marque' => null, 'modele' => null])
+            ->assertOk()->assertJsonPath('data.lock_version', 2);
+        $this->assertDatabaseHas('vehicules', ['id' => $id, 'marque' => null, 'modele' => null]);
+    }
+
+    public function test_chauffeur_phone_changes_are_versioned_and_remain_private_in_profiles_and_audits(): void
+    {
+        $this->admin();
+        $phone = '+1 202-555-0147';
+        $nextPhone = '+1 202-555-0185';
+        $user = User::factory()->create(['nom' => 'QA-contact-'.Str::uuid()]);
+        $created = $this->command('POST', '/api/parametrage/chauffeurs', ['user_id' => $user->id, 'telephone' => $phone])
+            ->assertCreated()->assertJsonMissingPath('data.telephone')->assertDontSee($phone);
+        $id = $created->json('data.id');
+        $uri = '/api/parametrage/chauffeurs/'.$id;
+        $this->assertDatabaseHas('chauffeurs', ['id' => $id, 'telephone' => $phone]);
+        $this->getJson($uri)->assertOk()->assertJsonMissingPath('data.telephone')->assertDontSee($phone);
+        $this->getJson('/api/parametrage/chauffeurs?search='.rawurlencode($user->nom))
+            ->assertOk()->assertJsonPath('data.0.id', $id)->assertJsonMissingPath('data.0.telephone')->assertDontSee($phone);
+
+        $key = (string) Str::uuid();
+        $change = ['version_attendue' => 0, 'telephone' => $nextPhone];
+        $this->command('PUT', $uri, $change, $key)->assertOk()->assertJsonPath('data.lock_version', 1)
+            ->assertJsonMissingPath('data.telephone')->assertDontSee($nextPhone);
+        $this->command('PUT', $uri, $change, $key)->assertOk()->assertJsonPath('data.lock_version', 1);
+        $this->command('PUT', $uri, [...$change, 'telephone' => $phone], $key)
+            ->assertConflict()->assertJsonPath('code', 'IDEMPOTENCY_CONFLICT');
+        $this->assertDatabaseHas('chauffeurs', ['id' => $id, 'telephone' => $nextPhone]);
+        $this->getJson('/api/parametrage/audit?object_type=chauffeur&object_id='.$id)->assertOk()
+            ->assertJsonCount(2, 'data')->assertDontSee($phone)->assertDontSee($nextPhone);
+        $audit = DB::table('organisation_audits')->where('object_type', 'chauffeur')->where('object_id', $id)
+            ->get(['before_values', 'after_values'])->toJson();
+        $this->assertStringNotContainsString($phone, $audit);
+        $this->assertStringNotContainsString($nextPhone, $audit);
+        $this->command('PUT', $uri, ['version_attendue' => 1, 'telephone' => 'invalid'])
+            ->assertUnprocessable()->assertJsonValidationErrors('telephone');
+        $this->command('PUT', $uri, ['version_attendue' => 1, 'telephone' => null])
+            ->assertOk()->assertJsonPath('data.lock_version', 2);
+        $this->assertDatabaseHas('chauffeurs', ['id' => $id, 'telephone' => null]);
     }
 
     public function test_chauffeur_profile_uses_one_user_link_and_exposes_only_the_name_projection(): void

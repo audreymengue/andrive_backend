@@ -17,6 +17,8 @@ class VehiculeResource extends JsonResource
         return [
             'id' => (int) $this->id,
             'immatriculation' => $this->immatriculation,
+            'marque' => $this->marque,
+            'modele' => $this->modele,
             'places_utiles' => (int) $this->places_utiles,
             'statut' => $this->statut,
             'lock_version' => (int) $this->lock_version,
