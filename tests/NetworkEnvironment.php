@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\PasswordService;
 use Database\Seeders\ParametrageSecuritySeeder;
 use Database\Seeders\PermissionSeeder;
+use Database\Seeders\QaCourseResourcesSeeder;
 use Database\Seeders\QaRoleAccountsSeeder;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Hash;
@@ -142,6 +143,7 @@ final class NetworkEnvironment
         $app->make(ParametrageSecuritySeeder::class)->run();
         $direction = Direction::factory()->create(['nom' => 'TEST NET organisation', 'code' => 'TEST_NET_'.$this->runId]);
         $app->make(QaRoleAccountsSeeder::class)->run($app->make(PasswordService::class), $direction->id);
+        $app->make(QaCourseResourcesSeeder::class)->run();
         $role = Role::where('system_key', 'super_admin')->firstOrFail();
         foreach (['a', 'b', 'user'] as $name) {
             $secret = bin2hex(random_bytes(6));

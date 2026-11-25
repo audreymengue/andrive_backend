@@ -2,8 +2,8 @@
 
 namespace App\Http\Requests;
 
-use App\Models\Direction;
-use App\Models\Service;
+use App\Models\Demande;
+use App\Services\DemandeReferences;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -20,6 +20,10 @@ abstract class DemandePayloadRequest extends ApiFormRequest
         return [
             'direction_id' => ['required', 'integer', 'min:1', Rule::exists('directions', 'id')],
             'service_id' => ['sometimes', 'nullable', 'integer', 'min:1', Rule::exists('services', 'id')],
+            'rattachement_direction_id' => [
+                'bail', 'sometimes', 'nullable', 'integer', 'min:1', 'prohibits:service_id',
+                Rule::exists('rattachements_direction', 'id')->where('direction_id', $this->integer('direction_id')),
+            ],
             'type_sortie_id' => ['required', 'integer', 'min:1', Rule::exists('types_sortie', 'id')],
             'adresse_depart_id' => ['required', 'integer', 'min:1', Rule::exists('entites_geographiques', 'id')],
             'adresse_retour_id' => ['nullable', 'integer', 'min:1', Rule::exists('entites_geographiques', 'id')],
@@ -61,35 +65,25 @@ abstract class DemandePayloadRequest extends ApiFormRequest
                     }
                 }
 
-                if ($validator->errors()->hasAny(['direction_id', 'service_id'])) {
+                if ($validator->errors()->isNotEmpty()) {
                     return;
                 }
 
-                $directionId = $this->input('direction_id');
-                if (! is_numeric($directionId) || ! Direction::query()->whereKey($directionId)->where('statut', 'ACTIF')->exists()) {
-                    $validator->errors()->add('direction_id', 'La direction doit être active pour une nouvelle demande.');
-
-                    return;
+                $previous = [];
+                if ($this->route('id') !== null) {
+                    $query = Demande::query()->whereKey($this->route('id'));
+                    if (! $this->user()->hasRole('super_admin')) {
+                        $query->where('demandeur_id', $this->user()->id);
+                    }
+                    $demande = $query->first();
+                    $source = $this instanceof UpdateDemandeModificationRequest ? $demande?->modification : $demande;
+                    if ($source !== null) {
+                        $previous = DemandeReferences::selection($source);
+                    }
                 }
 
-                $serviceId = $this->input('service_id');
-                if ($serviceId === null || ! is_numeric($serviceId)) {
-                    return;
-                }
-
-                $service = Service::query()->find($serviceId);
-                if ($service === null) {
-                    return;
-                }
-
-                if ((int) $service->direction_id !== (int) $directionId) {
-                    $validator->errors()->add('service_id', 'Le service doit appartenir à la direction sélectionnée.');
-
-                    return;
-                }
-
-                if ($service->statut !== 'ACTIF') {
-                    $validator->errors()->add('service_id', 'Un service inactif ne peut pas être rattaché à une nouvelle demande.');
+                foreach (DemandeReferences::invalidSelections($this->all(), $previous) as $field => $message) {
+                    $validator->errors()->add($field, $message);
                 }
             },
         ];
@@ -99,6 +93,8 @@ abstract class DemandePayloadRequest extends ApiFormRequest
     {
         return [
             ...parent::messages(),
+            'rattachement_direction_id.prohibits' => 'Choisissez un service ou un rattachement de direction.',
+            'rattachement_direction_id.exists' => 'Le rattachement doit appartenir à la direction sélectionnée.',
             'date_format' => 'Le champ :attribute doit respecter le format :format.',
             'regex' => 'Le champ :attribute est invalide.',
             'min.array' => 'Le champ :attribute doit contenir au moins :min élément.',
@@ -114,6 +110,7 @@ abstract class DemandePayloadRequest extends ApiFormRequest
             ...parent::attributes(),
             'type_sortie_id' => 'type de sortie',
             'service_id' => 'service',
+            'rattachement_direction_id' => 'rattachement de direction',
             'adresse_depart_id' => 'adresse de départ',
             'adresse_retour_id' => 'adresse de retour',
             'date_depart' => 'date de départ',

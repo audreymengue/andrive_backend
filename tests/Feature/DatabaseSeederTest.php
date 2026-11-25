@@ -10,6 +10,7 @@ use App\Models\Role;
 use App\Models\User;
 use App\Services\ParametrageSecurity;
 use Database\Seeders\DatabaseSeeder;
+use Database\Seeders\QaCourseResourcesSeeder;
 use Database\Seeders\TestDataSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -50,8 +51,10 @@ class DatabaseSeederTest extends TestCase
         }
         $this->assertDatabaseHas('chauffeurs', [
             'user_id' => User::query()->where('email', 'qa.chauffeur@example.test')->value('id'),
+            'telephone' => QaCourseResourcesSeeder::DRIVER_PHONE,
             'statut' => 'ACTIF',
         ]);
+        $this->assertDatabaseHas('vehicules', ['immatriculation' => QaCourseResourcesSeeder::PLATE, 'statut' => 'ACTIF', 'places_utiles' => 4]);
         $this->assertTrue(Hash::check('TestPass1!', User::query()->where('email', 'admin-test@aninf.ga')->firstOrFail()->password));
         $this->assertDatabaseCount('directions', 4);
         $this->assertDatabaseCount('types_sortie', 1);
@@ -91,7 +94,7 @@ class DatabaseSeederTest extends TestCase
         $this->configureTestSeeding();
         $this->travelTo('2026-09-29 09:00:00');
         $this->seed(DatabaseSeeder::class);
-        $tables = ['permissions', 'roles', 'users', 'directions', 'types_sortie', 'entites_geographiques', 'demandes', 'demande_destinations', 'demande_employes', 'demande_objets', 'demande_historiques', 'demande_modifications', 'demande_reference_sequences', 'role_has_permissions', 'model_has_roles'];
+        $tables = ['permissions', 'roles', 'users', 'directions', 'types_sortie', 'entites_geographiques', 'demandes', 'demande_destinations', 'demande_employes', 'demande_objets', 'demande_historiques', 'demande_modifications', 'demande_reference_sequences', 'chauffeurs', 'vehicules', 'role_has_permissions', 'model_has_roles'];
         $counts = collect($tables)->mapWithKeys(fn (string $table): array => [$table => DB::table($table)->count()])->all();
         $references = Demande::query()->orderBy('id')->pluck('reference')->all();
         $adminPasswordHash = User::query()->where('email', 'admin@aninf.ga')->value('password');
@@ -120,7 +123,7 @@ class DatabaseSeederTest extends TestCase
         $this->assertDatabaseHas('users', ['email' => 'admin@aninf.ga', 'must_change_password' => true]);
         $this->assertDatabaseCount('directions', 1);
         $this->assertSame($direction->id, User::query()->firstOrFail()->direction_id);
-        foreach (['types_sortie', 'entites_geographiques', 'demandes'] as $table) {
+        foreach (['types_sortie', 'entites_geographiques', 'demandes', 'chauffeurs', 'vehicules'] as $table) {
             $this->assertDatabaseCount($table, 0);
         }
     }

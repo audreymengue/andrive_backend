@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Http\Requests\ListOperationalCatalogRequest;
 use App\Http\Requests\ListReferenceCatalogRequest;
-use App\Models\DemandeModification;
 use App\Models\EntiteGeographique;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -26,19 +25,13 @@ class EntiteGeographiqueService
      */
     public function operationalList(ListOperationalCatalogRequest $request): LengthAwarePaginator
     {
-        $query = EntiteGeographique::query()->where('statut', 'ACTIF')->orderBy('id')->withExists([
-            'demandesAuDepart',
-            'demandesAuRetour',
-            'destinations',
-            'modificationsAuDepart',
-            'modificationsAuRetour',
-        ]);
+        $query = EntiteGeographique::query()->where('statut', 'ACTIF')->orderBy('id');
         if ($request->filled('search')) {
             $search = $request->validated('search');
             $query->where(fn (Builder $builder) => $builder->where('adresse', 'like', '%'.$search.'%')->orWhere('description', 'like', '%'.$search.'%'));
         }
 
-        return $this->includeModificationDestinationUsage($query->paginate($request->integer('per_page', 20)));
+        return $query->paginate($request->integer('per_page', 20));
     }
 
     /**
@@ -46,13 +39,7 @@ class EntiteGeographiqueService
      */
     public function adminList(ListReferenceCatalogRequest $request): LengthAwarePaginator
     {
-        $query = EntiteGeographique::query()->orderBy('id')->withExists([
-            'demandesAuDepart',
-            'demandesAuRetour',
-            'destinations',
-            'modificationsAuDepart',
-            'modificationsAuRetour',
-        ]);
+        $query = EntiteGeographique::query()->orderBy('id');
         if ($request->filled('statut')) {
             $query->where('statut', $request->validated('statut'));
         }
@@ -61,38 +48,7 @@ class EntiteGeographiqueService
             $query->where(fn (Builder $builder) => $builder->where('adresse', 'like', '%'.$search.'%')->orWhere('description', 'like', '%'.$search.'%'));
         }
 
-        return $this->includeModificationDestinationUsage($query->paginate($request->integer('per_page', 20)));
-    }
-
-    /**
-     * @param  LengthAwarePaginator<int, EntiteGeographique>  $page
-     * @return LengthAwarePaginator<int, EntiteGeographique>
-     */
-    private function includeModificationDestinationUsage(LengthAwarePaginator $page): LengthAwarePaginator
-    {
-        $ids = $page->getCollection()->modelKeys();
-        if ($ids === []) {
-            return $page;
-        }
-
-        $jsonDestinations = DemandeModification::query()
-            ->where(function (Builder $builder) use ($ids): void {
-                foreach ($ids as $id) {
-                    $builder->orWhereJsonContains('destinations', ['entite_geographique_id' => (int) $id]);
-                }
-            })
-            ->pluck('destinations');
-        $usedIds = $jsonDestinations->flatMap(function (mixed $json) use ($ids): array {
-            $destinations = is_string($json) ? json_decode($json, true, flags: JSON_THROW_ON_ERROR) : $json;
-
-            return collect($destinations)->filter(fn (array $destination): bool => in_array((int) $destination['entite_geographique_id'], $ids, true))
-                ->pluck('entite_geographique_id')->map(fn (int|string $id): int => (int) $id)->all();
-        })->unique()->all();
-        foreach ($page->getCollection() as $entity) {
-            $entity->setAttribute('modification_destinations_exists', in_array((int) $entity->id, $usedIds, true));
-        }
-
-        return $page;
+        return $query->paginate($request->integer('per_page', 20));
     }
 
     /**
@@ -120,12 +76,7 @@ class EntiteGeographiqueService
 
     public function isUsed(EntiteGeographique $entity): bool
     {
-        return $entity->demandesAuDepart()->exists()
-            || $entity->demandesAuRetour()->exists()
-            || $entity->destinations()->exists()
-            || $entity->modificationsAuDepart()->exists()
-            || $entity->modificationsAuRetour()->exists()
-            || DemandeModification::query()->whereJsonContains('destinations', ['entite_geographique_id' => (int) $entity->id])->exists();
+        return $entity->usage_observe_at !== null;
     }
 
     /**

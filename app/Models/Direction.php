@@ -37,6 +37,11 @@ class Direction extends Model
         return $this->hasMany(Service::class);
     }
 
+    public function rattachements(): HasMany
+    {
+        return $this->hasMany(RattachementDirection::class)->orderBy('id');
+    }
+
     public function demandes(): HasMany
     {
         return $this->hasMany(Demande::class);

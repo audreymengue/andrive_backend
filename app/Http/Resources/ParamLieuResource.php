@@ -15,16 +15,6 @@ class ParamLieuResource extends JsonResource
     {
         /** @var EntiteGeographique $entite */
         $entite = $this->resource;
-        $attributes = $entite->getAttributes();
-        $hasEagerUseFlags = array_key_exists('demandes_au_depart_exists', $attributes);
-        $utilise = $hasEagerUseFlags
-            ? (bool) $attributes['demandes_au_depart_exists']
-                || (bool) $attributes['demandes_au_retour_exists']
-                || (bool) $attributes['destinations_exists']
-                || (bool) $attributes['modifications_au_depart_exists']
-                || (bool) $attributes['modifications_au_retour_exists']
-                || (bool) ($attributes['modification_destinations_exists'] ?? false)
-            : app(\App\Services\EntiteGeographiqueService::class)->isUsed($entite);
 
         return [
             'id' => (int) $entite->id,
@@ -33,7 +23,7 @@ class ParamLieuResource extends JsonResource
             'longitude' => $entite->longitude,
             'description' => $entite->description,
             'statut' => $entite->statut,
-            'utilise' => (bool) $utilise,
+            'utilise' => $entite->usage_observe_at !== null,
             'lock_version' => (int) $entite->lock_version,
         ];
     }

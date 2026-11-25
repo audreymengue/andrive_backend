@@ -95,11 +95,14 @@ class DemandeService
     public function create(User $user, array $data): Demande
     {
         return DB::transaction(function () use ($user, $data): Demande {
+            DemandeReferences::lockGuard();
+            DemandeReferences::ensureActive($data);
             $demande = Demande::query()->create([
                 'reference' => $this->generateReference(),
                 'demandeur_id' => $user->id,
                 'direction_id' => $data['direction_id'],
                 'service_id' => $data['service_id'] ?? null,
+                'rattachement_direction_id' => $data['rattachement_direction_id'] ?? null,
                 'type_sortie_id' => $data['type_sortie_id'],
                 'adresse_depart_id' => $data['adresse_depart_id'],
                 'adresse_retour_id' => $data['adresse_retour_id'] ?? null,
@@ -162,10 +165,12 @@ class DemandeService
     public function update(User $user, int $id, array $data): Demande
     {
         return DB::transaction(function () use ($user, $id, $data): Demande {
+            DemandeReferences::lockGuard();
             $demande = Demande::query()->lockForUpdate()->findOrFail($id);
             $this->ensureCanManage($user, $demande);
             $this->ensureStatus($demande, Demande::STATUT_BROUILLON, 'Seule une demande en brouillon peut être modifiée.');
 
+            DemandeReferences::ensureActive($data, DemandeReferences::selection($demande));
             $this->fillDemande($demande, $data);
             $this->replaceChildren($demande, $data);
 
@@ -176,10 +181,12 @@ class DemandeService
     public function submit(User $user, int $id): Demande
     {
         return DB::transaction(function () use ($user, $id): Demande {
+            DemandeReferences::lockGuard();
             $demande = Demande::query()->lockForUpdate()->findOrFail($id);
             $this->ensureCanManage($user, $demande);
             $this->ensureStatus($demande, Demande::STATUT_BROUILLON, 'Seule une demande en brouillon peut être soumise.');
             $this->ensureDemandeCanBeSubmitted($demande);
+            DemandeReferences::ensureActive(DemandeReferences::selection($demande));
 
             $this->changeStatus($demande, Demande::STATUT_EN_ATTENTE, $user);
 
@@ -206,6 +213,7 @@ class DemandeService
     public function requestModification(User $user, int $id): Demande
     {
         return DB::transaction(function () use ($user, $id): Demande {
+            DemandeReferences::lockGuard();
             $demande = Demande::query()
                 ->with(['destinations', 'employes', 'objets'])
                 ->lockForUpdate()
@@ -221,6 +229,7 @@ class DemandeService
                 'demandeur_id' => $user->id,
                 'direction_id' => $demande->direction_id,
                 'service_id' => $demande->service_id,
+                'rattachement_direction_id' => $demande->rattachement_direction_id,
                 'type_sortie_id' => $demande->type_sortie_id,
                 'adresse_depart_id' => $demande->adresse_depart_id,
                 'adresse_retour_id' => $demande->adresse_retour_id,
@@ -255,6 +264,7 @@ class DemandeService
     public function updateModification(User $user, int $id, array $data): Demande
     {
         return DB::transaction(function () use ($user, $id, $data): Demande {
+            DemandeReferences::lockGuard();
             $demande = Demande::query()->lockForUpdate()->findOrFail($id);
             $this->ensureCanManage($user, $demande);
             $this->ensureStatus($demande, Demande::STATUT_VALIDEE, 'La modification est incompatible avec le statut actuel de la demande.');
@@ -265,6 +275,7 @@ class DemandeService
                 $this->conflict('Aucune modification en cours ne correspond à cette demande.');
             }
 
+            DemandeReferences::ensureActive($data, DemandeReferences::selection($modification));
             $this->fillModification($modification, $data);
 
             return $this->loadDetails($demande);
@@ -274,6 +285,7 @@ class DemandeService
     public function submitModification(User $user, int $id): Demande
     {
         return DB::transaction(function () use ($user, $id): Demande {
+            DemandeReferences::lockGuard();
             $demande = Demande::query()->lockForUpdate()->findOrFail($id);
             $this->ensureCanManage($user, $demande);
             $this->ensureStatus($demande, Demande::STATUT_VALIDEE, 'La modification ne peut pas être soumise dans l’état actuel de la demande.');
@@ -285,6 +297,7 @@ class DemandeService
             }
 
             $this->ensureModificationCanBeSubmitted($modification);
+            DemandeReferences::ensureActive(DemandeReferences::selection($modification));
             $modification->update(['submitted_at' => now()]);
             $this->changeStatus($demande, Demande::STATUT_REVALIDATION_REQUISE, $user);
 
@@ -298,6 +311,7 @@ class DemandeService
             'demandeur:id,nom,prenom',
             'direction:id,nom',
             'service:id,nom,code',
+            'rattachementDirection:id,nom,code',
             'typeSortie:id,libelle,code',
             'adresseDepart:id,adresse,latitude,longitude,description',
             'adresseRetour:id,adresse,latitude,longitude,description',
@@ -313,6 +327,7 @@ class DemandeService
             'demandeur:id,nom,prenom',
             'direction:id,nom',
             'service:id,nom,code',
+            'rattachementDirection:id,nom,code',
             'typeSortie:id,libelle,code',
             'adresseDepart:id,adresse,latitude,longitude,description',
             'adresseRetour:id,adresse,latitude,longitude,description',
@@ -330,6 +345,7 @@ class DemandeService
         $demande->update([
             'direction_id' => $data['direction_id'],
             'service_id' => $data['service_id'] ?? null,
+            'rattachement_direction_id' => $data['rattachement_direction_id'] ?? null,
             'type_sortie_id' => $data['type_sortie_id'],
             'adresse_depart_id' => $data['adresse_depart_id'],
             'adresse_retour_id' => $data['adresse_retour_id'] ?? null,
@@ -363,6 +379,7 @@ class DemandeService
         $modification->update([
             'direction_id' => $data['direction_id'],
             'service_id' => $data['service_id'] ?? null,
+            'rattachement_direction_id' => $data['rattachement_direction_id'] ?? null,
             'type_sortie_id' => $data['type_sortie_id'],
             'adresse_depart_id' => $data['adresse_depart_id'],
             'adresse_retour_id' => $data['adresse_retour_id'] ?? null,

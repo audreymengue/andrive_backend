@@ -2,7 +2,15 @@
 
 namespace App\Notifications;
 
+use App\Jobs\SendPushNotification;
+use App\Models\PushDevice;
+use App\Models\User;
+use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Notifications\Notification;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class TreatmentNotification extends Notification
 {
@@ -22,6 +30,25 @@ class TreatmentNotification extends Notification
     public function via(object $notifiable): array
     {
         return ['database'];
+    }
+
+    public function afterSending(object $notifiable, string $channel, mixed $response): void
+    {
+        if ($channel !== 'database' || ! config('services.fcm.enabled') || ! $notifiable instanceof User || ! $response instanceof DatabaseNotification) {
+            return;
+        }
+
+        $userId = (int) $notifiable->getKey();
+        $notificationId = (string) $response->getKey();
+        DB::afterCommit(static function () use ($userId, $notificationId): void {
+            try {
+                foreach (PushDevice::query()->where('user_id', $userId)->pluck('id') as $deviceId) {
+                    Bus::dispatch(new SendPushNotification($userId, $notificationId, (int) $deviceId));
+                }
+            } catch (Throwable) {
+                Log::warning('Échec de mise en file du push pour une notification interne.', ['notification_id' => $notificationId]);
+            }
+        });
     }
 
     public function databaseType(object $notifiable): string

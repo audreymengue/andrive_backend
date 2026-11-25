@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Chauffeur;
 use App\Models\Course;
 use App\Models\Demande;
+use App\Models\DemandeDestination;
 use App\Models\DemandeEmploye;
 use App\Models\DemandeObjet;
 use App\Models\Direction;
@@ -50,6 +51,7 @@ class TreatmentCourseApiTest extends TestCase
         $contract = Yaml::parseFile(base_path('openapi.yaml'));
         $expected = [
             'get /api/traitement/demandes' => 'read_demande_traitement',
+            'get /api/traitement/demandes/{id}' => 'read_demande_traitement',
             'get /api/courses' => 'read_course',
             'post /api/courses' => 'create_course',
             'get /api/courses/{id}' => 'read_course',
@@ -98,8 +100,57 @@ class TreatmentCourseApiTest extends TestCase
         $this->assertArrayNotHasKey('demandeur', $response->json('data.0'));
         $this->assertArrayNotHasKey('employes', $response->json('data.0'));
         $this->assertArrayNotHasKey('objets', $response->json('data.0'));
-        $this->assertSame(['id', 'reference', 'statut', 'direction', 'service', 'date_depart', 'heure_depart', 'personnes_count', 'objets_count'], array_keys($response->json('data.0')));
+        $this->assertSame(['id', 'reference', 'statut', 'direction', 'service', 'rattachement_direction', 'date_depart', 'heure_depart', 'personnes_count', 'objets_count'], array_keys($response->json('data.0')));
         $this->assertSame(Demande::STATUT_EN_ATTENTE, $pending->fresh()->statut);
+    }
+
+    public function test_planning_detail_enforces_permissions_and_only_discloses_pending_requests(): void
+    {
+        $demande = Demande::factory()->create(['statut' => Demande::STATUT_EN_ATTENTE]);
+        $url = '/api/traitement/demandes/'.$demande->id;
+        $this->getJson($url)->assertUnauthorized()->assertJsonPath('code', 'UNAUTHENTICATED');
+        $this->authenticate($this->userWith('read_demande'));
+        $this->getJson($url)->assertForbidden()->assertJsonPath('code', 'FORBIDDEN');
+        $operator = $this->userWith('read_demande_traitement');
+        $operator->update(['must_change_password' => true]);
+        $this->authenticate($operator);
+        $this->getJson($url)->assertForbidden()->assertJsonPath('code', 'PASSWORD_CHANGE_REQUIRED');
+        $operator->update(['must_change_password' => false]);
+        $this->authenticate($operator);
+
+        $response = $this->getJson($url)->assertOk()
+            ->assertJsonPath('data.adresse_retour', null)
+            ->assertJsonPath('data.destinations', [])
+            ->assertJsonPath('data.employes', [])
+            ->assertJsonPath('data.objets', []);
+        $this->assertStringContainsString('no-store', $response->headers->get('Cache-Control'));
+        $this->assertSame(['id', 'reference', 'statut', 'date_depart', 'heure_depart', 'heure_retour', 'adresse_depart', 'adresse_retour', 'destinations', 'employes', 'objets'], array_keys($response->json('data')));
+
+        $missing = $this->getJson('/api/traitement/demandes/'.(Demande::max('id') + 1))->assertNotFound()
+            ->assertJsonPath('code', 'DEMANDE_NOT_FOUND')->json();
+        foreach (array_diff(Demande::STATUTS, [Demande::STATUT_EN_ATTENTE]) as $status) {
+            $demande->update(['statut' => $status]);
+            $this->getJson($url)->assertNotFound()->assertExactJson($missing);
+        }
+    }
+
+    public function test_pending_demande_displays_its_direction_choice_to_the_treatment_operator(): void
+    {
+        $direction = Direction::factory()->create();
+        $cabinet = $direction->rattachements()->create(['code' => 'CABINET', 'nom' => 'Cabinet']);
+        $demande = Demande::factory()->create([
+            'direction_id' => $direction->id,
+            'rattachement_direction_id' => $cabinet->id,
+            'statut' => Demande::STATUT_EN_ATTENTE,
+        ]);
+
+        $this->authenticate($this->userWith('read_demande_traitement'));
+        $this->getJson('/api/traitement/demandes?direction_id='.$direction->id)->assertOk()
+            ->assertJsonPath('data.0.id', $demande->id)
+            ->assertJsonPath('data.0.service', null)
+            ->assertJsonPath('data.0.rattachement_direction.id', $cabinet->id)
+            ->assertJsonPath('data.0.rattachement_direction.code', 'CABINET')
+            ->assertJsonPath('data.0.rattachement_direction.nom', 'Cabinet');
     }
 
     public function test_course_routes_enforce_authentication_permissions_validation_and_pagination_limit(): void
@@ -243,35 +294,54 @@ class TreatmentCourseApiTest extends TestCase
 
     public function test_manual_route_plan_is_versioned_and_does_not_confirm_or_change_statuses(): void
     {
-        $user = $this->userWith(['create_course', 'update_course', 'read_course']);
-        $demande = Demande::factory()->create(['statut' => Demande::STATUT_EN_ATTENTE]);
-        $employee = DemandeEmploye::factory()->create(['demande_id' => $demande->id]);
-        $object = DemandeObjet::factory()->create(['demande_id' => $demande->id]);
+        $user = $this->userWith(['read_demande_traitement', 'create_course', 'update_course', 'read_course']);
+        $demande = Demande::factory()->create(['statut' => Demande::STATUT_EN_ATTENTE, 'date_depart' => '2087-11-12']);
+        DemandeEmploye::factory()->create(['demande_id' => $demande->id, 'nom' => 'Exemple', 'prenom' => 'Anne']);
+        DemandeObjet::factory()->create(['demande_id' => $demande->id, 'designation' => 'Carton', 'quantite' => 2]);
+        DemandeDestination::factory()->create(['demande_id' => $demande->id, 'ordre' => 2]);
+        DemandeDestination::factory()->create(['demande_id' => $demande->id, 'ordre' => 1]);
         $this->authenticate($user);
+        $pending = $this->getJson('/api/traitement/demandes?date_depart_from=2087-11-12&date_depart_to=2087-11-12')
+            ->assertOk()->assertJsonCount(1, 'data')->json('data.0');
+        $detail = $this->getJson('/api/traitement/demandes/'.$pending['id'])->assertOk()
+            ->assertJsonPath('data.reference', $pending['reference'])
+            ->assertJsonPath('data.employes.0.nom', 'Exemple')
+            ->assertJsonPath('data.employes.0.prenom', 'Anne')
+            ->assertJsonPath('data.objets.0.designation', 'Carton')
+            ->assertJsonPath('data.objets.0.quantite', 2)
+            ->assertJsonPath('data.destinations.0.ordre', 1)
+            ->assertJsonPath('data.destinations.1.ordre', 2)->json('data');
+        $this->assertSame(['id', 'nom', 'prenom'], array_keys($detail['employes'][0]));
+        $this->assertSame(['id', 'designation', 'quantite'], array_keys($detail['objets'][0]));
+        $this->assertSame(['id', 'adresse'], array_keys($detail['destinations'][0]['entite_geographique']));
+        $employeeId = $detail['employes'][0]['id'];
+        $objectId = $detail['objets'][0]['id'];
         $course = $this->postJson('/api/courses', [], ['Idempotency-Key' => (string) Str::uuid()])->assertCreated()->json('data');
         $plan = [
-            'occupation_debut_prevue' => '2026-11-12T07:30:00+01:00',
-            'occupation_fin_prevue' => '2026-11-12T17:00:00+01:00',
+            'occupation_debut_prevue' => '2087-11-12T07:30:00+01:00',
+            'occupation_fin_prevue' => '2087-11-12T17:00:00+01:00',
             'chargement_confirme' => true,
             'arrets' => [
-                ['ordre' => 2, 'lieu' => 'Lieu de dépose', 'heure_prevue' => '2026-11-12T09:00:00+01:00', 'employes' => [['demande_employe_id' => $employee->id, 'action' => 'DEPOSE']], 'objets' => [['demande_objet_id' => $object->id, 'action' => 'DEPOSE']]],
-                ['ordre' => 1, 'lieu' => 'Lieu de prise en charge', 'heure_prevue' => '2026-11-12T08:00:00+01:00', 'employes' => [['demande_employe_id' => $employee->id, 'action' => 'PRISE_EN_CHARGE']], 'objets' => [['demande_objet_id' => $object->id, 'action' => 'PRISE_EN_CHARGE']]],
+                ['ordre' => 2, 'lieu' => $detail['destinations'][0]['entite_geographique']['adresse'], 'heure_prevue' => '2087-11-12T09:00:00+01:00', 'employes' => [['demande_employe_id' => $employeeId, 'action' => 'DEPOSE']], 'objets' => [['demande_objet_id' => $objectId, 'action' => 'DEPOSE']]],
+                ['ordre' => 1, 'lieu' => $detail['adresse_depart']['adresse'], 'heure_prevue' => '2087-11-12T08:00:00+01:00', 'employes' => [['demande_employe_id' => $employeeId, 'action' => 'PRISE_EN_CHARGE']], 'objets' => [['demande_objet_id' => $objectId, 'action' => 'PRISE_EN_CHARGE']]],
             ],
         ];
 
-        $response = $this->putJson('/api/courses/'.$course['id'], ['version_attendue' => 0, 'demande_ids' => [$demande->id], 'plan' => $plan], ['Idempotency-Key' => (string) Str::uuid()])
+        $response = $this->putJson('/api/courses/'.$course['id'], ['version_attendue' => $course['lock_version'], 'demande_ids' => [$detail['id']], 'plan' => $plan], ['Idempotency-Key' => (string) Str::uuid()])
             ->assertOk()->assertJsonPath('data.lock_version', 1)->assertJsonPath('data.version_preparation', 2)
             ->assertJsonPath('data.plan.chargement_confirme', true)
             ->assertJsonPath('data.plan.arrets.0.ordre', 1)
+            ->assertJsonPath('data.plan.arrets.0.employes.0.demande_employe_id', $employeeId)
+            ->assertJsonPath('data.plan.arrets.1.objets.0.demande_objet_id', $objectId)
             ->assertJsonPath('data.plan.arrets.0.employes.0.action', 'PRISE_EN_CHARGE')
             ->assertJsonPath('data.plan.arrets.1.objets.0.action', 'DEPOSE')
-            ->assertJsonPath('data.preparations.1.plan.occupation_debut_prevue', '2026-11-12T07:30:00+01:00');
+            ->assertJsonPath('data.preparations.1.plan.occupation_debut_prevue', '2087-11-12T07:30:00+01:00');
 
         $this->assertNull($response->json('data.statut_execution'));
         $this->assertSame(Demande::STATUT_EN_ATTENTE, $demande->fresh()->statut);
-        $this->putJson('/api/courses/'.$course['id'], ['version_attendue' => 1, 'demande_ids' => [$demande->id]], ['Idempotency-Key' => (string) Str::uuid()])
+        $this->putJson('/api/courses/'.$course['id'], ['version_attendue' => 1, 'demande_ids' => [$detail['id']]], ['Idempotency-Key' => (string) Str::uuid()])
             ->assertOk()->assertJsonPath('data.plan.arrets.0.ordre', 1)->assertJsonPath('data.lock_version', 1);
-        $this->putJson('/api/courses/'.$course['id'], ['version_attendue' => 1, 'demande_ids' => [$demande->id], 'plan' => null], ['Idempotency-Key' => (string) Str::uuid()])
+        $this->putJson('/api/courses/'.$course['id'], ['version_attendue' => 1, 'demande_ids' => [$detail['id']], 'plan' => null], ['Idempotency-Key' => (string) Str::uuid()])
             ->assertOk()->assertJsonPath('data.plan', null)->assertJsonPath('data.preparations.1.plan.arrets.0.ordre', 1)->assertJsonPath('data.lock_version', 2);
     }
 

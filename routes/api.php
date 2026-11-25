@@ -8,6 +8,7 @@ use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OrganisationController;
 use App\Http\Controllers\ParametrageJournalController;
 use App\Http\Controllers\PermissionController;
+use App\Http\Controllers\PushDeviceController;
 use App\Http\Controllers\ResourceProfileController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\TemporaryPasswordController;
@@ -49,6 +50,9 @@ Route::middleware(['auth:sanctum', SerializeAuthentication::class])->group(funct
     Route::put('/me/password', [AuthController::class, 'updatePassword'])->middleware(SerializeAuthentication::class)->defaults('authentication_api', true);
 
     Route::middleware('password.changed')->group(function (): void {
+        Route::put('/me/push-devices/{installation_id}', [PushDeviceController::class, 'update'])->defaults('notification_api', true);
+        Route::delete('/me/push-devices/{installation_id}', [PushDeviceController::class, 'destroy'])->defaults('notification_api', true);
+
         Route::get('/notifications', [NotificationController::class, 'index'])->defaults('notification_api', true);
         Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount'])->defaults('notification_api', true);
         Route::patch('/notifications/read-all', [NotificationController::class, 'markAllRead'])->defaults('notification_api', true);
@@ -87,6 +91,7 @@ Route::middleware(['auth:sanctum', SerializeAuthentication::class])->group(funct
         Route::middleware('parametrage:update_entite_geographique,entite_geographique')->put('/entites-geographiques/{id}', [EntiteGeographiqueController::class, 'update'])->whereNumber('id')->defaults('reference_catalog_api', true)->defaults('parametrage_api', true);
         Route::middleware('parametrage:delete_entite_geographique,entite_geographique')->delete('/entites-geographiques/{id}', [EntiteGeographiqueController::class, 'destroy'])->whereNumber('id')->defaults('reference_catalog_api', true)->defaults('parametrage_api', true);
         Route::middleware('permission:read_demande_traitement')->get('/traitement/demandes', [TreatmentDemandeController::class, 'index'])->defaults('treatment_api', true);
+        Route::middleware('permission:read_demande_traitement')->get('/traitement/demandes/{id}', [TreatmentDemandeController::class, 'show'])->whereNumber('id')->defaults('treatment_api', true);
         Route::middleware('permission:read_course')->get('/courses', [CourseController::class, 'index'])->defaults('treatment_api', true);
         Route::middleware('permission:create_course')->post('/courses', [CourseController::class, 'store'])->defaults('treatment_api', true);
         Route::middleware('permission:read_course')->get('/courses/{id}', [CourseController::class, 'show'])->whereNumber('id')->defaults('treatment_api', true);

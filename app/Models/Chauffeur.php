@@ -12,9 +12,9 @@ class Chauffeur extends Model
     /** @use HasFactory<ChauffeurFactory> */
     use HasFactory;
 
-    protected $fillable = ['user_id', 'telephone', 'statut'];
+    protected $fillable = ['user_id', 'nom_complet', 'mention_pool', 'telephone', 'statut'];
 
-    protected $hidden = ['telephone'];
+    protected $hidden = ['telephone', 'reference_source'];
 
     protected function casts(): array
     {

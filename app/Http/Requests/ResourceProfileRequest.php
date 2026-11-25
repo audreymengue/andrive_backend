@@ -51,6 +51,8 @@ class ResourceProfileRequest extends ApiFormRequest
                 'marque' => ['sometimes', 'nullable', 'string', 'max:255'],
                 'modele' => ['sometimes', 'nullable', 'string', 'max:255'],
             ] : [
+                'nom_complet' => ['sometimes', 'nullable', 'string', 'max:255'],
+                'mention_pool' => ['sometimes', 'nullable', 'string', 'max:255'],
                 'telephone' => ['sometimes', 'nullable', 'string', 'max:32', 'regex:/^\+?(?=[0-9 ().-]*[0-9])[0-9 ().-]+$/D'],
             ];
         }

@@ -15,6 +15,8 @@ class Vehicule extends Model
 
     protected $fillable = ['immatriculation', 'marque', 'modele', 'places_utiles', 'statut'];
 
+    protected $hidden = ['immatriculation_source'];
+
     protected function casts(): array
     {
         return ['places_utiles' => 'integer', 'lock_version' => 'integer'];

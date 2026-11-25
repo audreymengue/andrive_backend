@@ -175,7 +175,7 @@ class ResourceProfileApiTest extends TestCase
             ->assertJsonPath('data.utilisateur.nom', 'Test Chauffeur')
             ->assertJsonPath('data.utilisateur.prenom', 'Awa');
         $id = $created->json('data.id');
-        $this->assertSame(['id', 'user_id', 'utilisateur', 'statut', 'lock_version'], array_keys($created->json('data')));
+        $this->assertSame(['id', 'user_id', 'utilisateur', 'nom_complet', 'mention_pool', 'statut', 'lock_version'], array_keys($created->json('data')));
         $this->assertSame(['id', 'nom', 'prenom', 'statut'], array_keys($created->json('data.utilisateur')));
         $this->assertTrue($user->fresh()->chauffeurProfile->is(Chauffeur::findOrFail($id)));
 
@@ -188,6 +188,44 @@ class ResourceProfileApiTest extends TestCase
         $this->assertDatabaseHas('chauffeurs', ['id' => $id, 'user_id' => null]);
         $this->assertSame(2, DB::table('organisation_audits')->where('object_type', 'chauffeur')->where('object_id', $id)->count());
         $this->assertSame(1, $unlinked->json('data.lock_version'));
+    }
+
+    public function test_catalogue_manages_and_finds_a_named_driver_without_a_user_account(): void
+    {
+        $this->admin();
+        $userCount = User::query()->count();
+        $uri = '/api/parametrage/chauffeurs';
+        $payload = ['nom_complet' => 'Pilote Fictif Annuaire', 'mention_pool' => 'Pool de test', 'telephone' => '+1 202-555-0133'];
+        $key = (string) Str::uuid();
+        $created = $this->command('POST', $uri, $payload, $key)->assertCreated()
+            ->assertJsonPath('data.nom_complet', $payload['nom_complet'])
+            ->assertJsonPath('data.mention_pool', $payload['mention_pool'])
+            ->assertJsonPath('data.user_id', null)
+            ->assertJsonPath('data.utilisateur', null)
+            ->assertJsonMissingPath('data.reference_source')
+            ->assertJsonMissingPath('data.telephone');
+        $id = $created->json('data.id');
+        $detail = $uri.'/'.$id;
+        $this->command('POST', $uri, $payload, $key)->assertCreated()->assertExactJson($created->json());
+        $this->assertDatabaseHas('chauffeurs', ['id' => $id, ...$payload, 'user_id' => null]);
+        $this->assertSame($userCount, User::query()->count());
+
+        $this->getJson($uri.'?search=Fictif%20Annuaire&statut=ACTIF')->assertOk()->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $id)->assertJsonMissingPath('data.0.telephone');
+        $this->getJson($detail)->assertOk()->assertJsonPath('data.nom_complet', $payload['nom_complet'])
+            ->assertJsonPath('data.mention_pool', $payload['mention_pool'])->assertDontSee($payload['telephone']);
+
+        $this->command('PUT', $detail, ['version_attendue' => 0, 'nom_complet' => str_repeat('x', 256), 'mention_pool' => ['invalide']])
+            ->assertUnprocessable()->assertJsonValidationErrors(['nom_complet', 'mention_pool']);
+        $this->command('PUT', $detail, ['version_attendue' => 0, 'nom_complet' => 'Pilote Renommé', 'mention_pool' => null])
+            ->assertOk()->assertJsonPath('data.nom_complet', 'Pilote Renommé')->assertJsonPath('data.mention_pool', null)
+            ->assertJsonPath('data.lock_version', 1);
+        $this->getJson($uri.'?search=Fictif%20Annuaire')->assertOk()->assertJsonCount(0, 'data');
+        $this->getJson('/api/parametrage/audit?object_type=chauffeur&object_id='.$id)->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertDontSee($payload['telephone'])
+            ->assertDontSee($payload['nom_complet'])
+            ->assertDontSee($payload['mention_pool']);
     }
 
     public function test_chauffeur_filter_and_per_page_limit_are_applied(): void

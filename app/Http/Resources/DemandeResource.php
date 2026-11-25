@@ -32,6 +32,11 @@ class DemandeResource extends JsonResource
                 'nom' => $this->service->nom,
                 'code' => $this->service->code,
             ]),
+            'rattachement_direction' => $this->whenLoaded('rattachementDirection', fn (): array => [
+                'id' => $this->rattachementDirection->id,
+                'nom' => $this->rattachementDirection->nom,
+                'code' => $this->rattachementDirection->code,
+            ]),
             'type_sortie' => $this->whenLoaded('typeSortie', fn (): array => [
                 'id' => $this->typeSortie->id,
                 'libelle' => $this->typeSortie->libelle,

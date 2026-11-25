@@ -147,6 +147,8 @@ class NotificationsApiTest extends TestCase
     {
         $contract = Yaml::parseFile(base_path('openapi.yaml'));
         $expected = [
+            'put /api/me/push-devices/{installation_id}' => 'registerMyPushDevice',
+            'delete /api/me/push-devices/{installation_id}' => 'removeMyPushDevice',
             'get /api/notifications' => 'notificationList',
             'get /api/notifications/unread-count' => 'notificationUnreadCount',
             'patch /api/notifications/read-all' => 'notificationMarkAllRead',

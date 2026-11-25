@@ -15,8 +15,7 @@ class OfficialOrganisationSeeder extends Seeder
      *
      * The supplied list has no code for Direction Generale or for Services, so
      * stable technical codes are derived from their names. The DCM source repeats
-     * one Service verbatim; it is seeded once. The Direction Generale positions
-     * are retained in its description, not converted into unapproved Services.
+     * one Service verbatim; it is seeded once. DG units have their own catalogue.
      */
     public function run(): void
     {
@@ -26,6 +25,13 @@ class OfficialOrganisationSeeder extends Seeder
                 'code' => 'DG',
                 'description' => 'Conseillers, Chargés d’Etude, Coordonnateur, Cabinet et autre',
                 'services' => [],
+                'rattachements' => [
+                    'CONSEILLERS' => 'Conseillers',
+                    'CHARGES_ETUDE' => 'Chargés d’Étude',
+                    'COORDONNATEUR' => 'Coordonnateur',
+                    'CABINET' => 'Cabinet',
+                    'AUTRE' => 'Autre',
+                ],
             ],
             [
                 'nom' => 'Direction de l’Ingénierie et des Réseaux',
@@ -137,6 +143,10 @@ class OfficialOrganisationSeeder extends Seeder
                         'statut' => 'ACTIF',
                     ],
                 );
+
+                foreach ($directionData['rattachements'] ?? [] as $code => $nom) {
+                    $direction->rattachements()->firstOrCreate(['code' => $code], ['nom' => $nom]);
+                }
 
                 foreach ($directionData['services'] as $serviceName) {
                     Service::query()->firstOrCreate(

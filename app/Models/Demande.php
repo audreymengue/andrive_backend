@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\DemandeReferences;
 use Database\Factories\DemandeFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -42,6 +43,16 @@ class Demande extends Model
     /** @use HasFactory<DemandeFactory> */
     use HasFactory;
 
+    protected static function booted(): void
+    {
+        static::saved(function (self $record): void {
+            $fields = ['type_sortie_id', 'adresse_depart_id', 'adresse_retour_id'];
+            if ($record->isDirty($fields)) {
+                DemandeReferences::recordUsage($record->only($fields));
+            }
+        });
+    }
+
     /**
      * @var list<string>
      */
@@ -50,6 +61,7 @@ class Demande extends Model
         'demandeur_id',
         'direction_id',
         'service_id',
+        'rattachement_direction_id',
         'type_sortie_id',
         'adresse_depart_id',
         'adresse_retour_id',
@@ -84,6 +96,11 @@ class Demande extends Model
     public function service(): BelongsTo
     {
         return $this->belongsTo(Service::class);
+    }
+
+    public function rattachementDirection(): BelongsTo
+    {
+        return $this->belongsTo(RattachementDirection::class);
     }
 
     public function typeSortie(): BelongsTo

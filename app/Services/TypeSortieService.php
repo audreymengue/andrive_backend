@@ -25,7 +25,7 @@ class TypeSortieService
      */
     public function operationalList(ListOperationalCatalogRequest $request): LengthAwarePaginator
     {
-        $query = TypeSortie::query()->where('statut', 'ACTIF')->orderBy('id')->withExists(['demandes', 'modifications']);
+        $query = TypeSortie::query()->where('statut', 'ACTIF')->orderBy('id');
         if ($request->filled('search')) {
             $search = $request->validated('search');
             $query->where(fn (Builder $builder) => $builder->where('code', 'like', '%'.$search.'%')->orWhere('libelle', 'like', '%'.$search.'%'));
@@ -39,7 +39,7 @@ class TypeSortieService
      */
     public function adminList(ListReferenceCatalogRequest $request): LengthAwarePaginator
     {
-        $query = TypeSortie::query()->orderBy('id')->withExists(['demandes', 'modifications']);
+        $query = TypeSortie::query()->orderBy('id');
         if ($request->filled('statut')) {
             $query->where('statut', $request->validated('statut'));
         }
@@ -76,7 +76,7 @@ class TypeSortieService
 
     public function isUsed(TypeSortie $typeSortie): bool
     {
-        return $typeSortie->demandes()->exists() || $typeSortie->modifications()->exists();
+        return $typeSortie->usage_observe_at !== null;
     }
 
     /**

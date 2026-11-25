@@ -31,6 +31,7 @@ class DatabaseSeeder extends Seeder
                 TestDataSeeder::class,
                 OfficialOrganisationSeeder::class,
             ]);
+            $this->seedOfficialFleetIfProvided();
 
             return;
         }
@@ -41,5 +42,17 @@ class DatabaseSeeder extends Seeder
             OfficialOrganisationSeeder::class,
             AdminUserSeeder::class,
         ]);
+        $this->seedOfficialFleetIfProvided();
+    }
+
+    private function seedOfficialFleetIfProvided(): void
+    {
+        if (is_file(OfficialFleetSeeder::defaultPath())) {
+            $this->call(OfficialFleetSeeder::class);
+
+            return;
+        }
+
+        $this->command?->warn('Parc officiel ignoré : fichier privé storage/app/private/parc-officiel.json absent.');
     }
 }

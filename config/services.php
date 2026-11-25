@@ -14,6 +14,11 @@ return [
     |
     */
 
+    'fcm' => [
+        'enabled' => env('PUSH_ENABLED', false),
+        'credentials' => env('FIREBASE_CREDENTIALS'),
+    ],
+
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],

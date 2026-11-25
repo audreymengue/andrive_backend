@@ -21,6 +21,9 @@ class OrganisationService
         $query = $class::query();
         if (! $request->route('organisation_admin')) {
             $query->where('statut', 'ACTIF');
+            if ($class === Direction::class) {
+                $query->with('rattachements:id,direction_id,code,nom');
+            }
         } elseif ($request->filled('statut')) {
             $query->where('statut', $request->validated('statut'));
         }

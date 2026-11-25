@@ -8,6 +8,7 @@ use App\Http\Resources\VehiculeResource;
 use App\Models\Chauffeur;
 use App\Models\User;
 use App\Models\Vehicule;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -31,7 +32,11 @@ class ResourceProfileService
             if ($kind === 'vehicule') {
                 $query->where('immatriculation', 'like', '%'.$search.'%');
             } else {
-                $query->whereHas('user', fn ($userQuery) => $userQuery->where(fn ($nameQuery) => $nameQuery->where('nom', 'like', '%'.$search.'%')->orWhere('prenom', 'like', '%'.$search.'%')));
+                $pattern = '%'.$search.'%';
+                $query->where(function (Builder $chauffeurs) use ($pattern): void {
+                    $chauffeurs->where('nom_complet', 'like', $pattern)
+                        ->orWhereHas('user', fn (Builder $users) => $users->whereAny(['nom', 'prenom'], 'like', $pattern));
+                });
             }
         }
 
@@ -172,7 +177,13 @@ class ResourceProfileService
             $this->assertUserExists((int) $userId);
             $this->assertUserNotLinked((int) $userId);
         }
-        $model->fill(['user_id' => $userId, 'telephone' => $data['telephone'] ?? null, 'statut' => 'ACTIF']);
+        $model->fill([
+            'user_id' => $userId,
+            'nom_complet' => $data['nom_complet'] ?? null,
+            'mention_pool' => $data['mention_pool'] ?? null,
+            'telephone' => $data['telephone'] ?? null,
+            'statut' => 'ACTIF',
+        ]);
     }
 
     private function updateProfile(Model $model, string $kind, array $data): void
@@ -190,9 +201,7 @@ class ResourceProfileService
             }
             $model->user_id = $data['user_id'];
         }
-        if (array_key_exists('telephone', $data)) {
-            $model->telephone = $data['telephone'];
-        }
+        $model->fill(array_intersect_key($data, array_flip(['nom_complet', 'mention_pool', 'telephone'])));
     }
 
     private function assertUserExists(int $userId): void

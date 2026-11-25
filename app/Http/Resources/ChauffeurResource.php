@@ -25,6 +25,8 @@ class ChauffeurResource extends JsonResource
                 'prenom' => $user->prenom,
                 'statut' => $user->statut,
             ],
+            'nom_complet' => $this->nom_complet,
+            'mention_pool' => $this->mention_pool,
             'statut' => $this->statut,
             'lock_version' => (int) $this->lock_version,
         ];

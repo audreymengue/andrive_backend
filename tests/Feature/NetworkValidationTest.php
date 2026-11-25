@@ -130,6 +130,24 @@ class NetworkValidationTest extends TestCase
         $network->saveEvidence();
     }
 
+    public function test_push_installation_registration_opt_out_and_logout_over_http(): void
+    {
+        $network = self::$network;
+        $actor = $this->networkActor('push', []);
+        $installation = (string) Str::uuid();
+        $path = '/api/me/push-devices/'.$installation;
+        $body = ['plateforme' => 'android', 'token' => 'fcm-test:'.bin2hex(random_bytes(50))];
+        $this->expectHttpCode(401, $network->request('PUT', $path, $body), 'Inscription push sans session');
+        $registered = $network->request('PUT', $path, $body, $actor['token']);
+        $this->expectHttpCode(200, $registered, 'Inscription push');
+        $this->assertStringNotContainsString($body['token'], json_encode($registered['json'], JSON_THROW_ON_ERROR));
+        $this->expectHttpCode(204, $network->request('DELETE', $path, token: $actor['token']), 'Retrait du consentement push');
+        $this->expectHttpCode(200, $network->request('PUT', $path, $body, $actor['token']), 'Réinscription push');
+        $this->expectHttpCode(200, $network->request('POST', '/api/logout', token: $actor['token']), 'Déconnexion de l’installation');
+        $this->assertSame(0, (int) $network->scalar('SELECT COUNT(*) FROM push_devices WHERE installation_id = ?', [$installation]));
+        $this->expectHttpCode(401, $network->request('PUT', $path, $body, $actor['token']), 'Réutilisation de la session déconnectée');
+    }
+
     public function test_seeded_qa_accounts_log_in_and_return_their_roles_over_real_http(): void
     {
         $network = self::$network;
@@ -570,7 +588,14 @@ class NetworkValidationTest extends TestCase
         }
         $network->saveEvidence();
         $this->assertSame(0, $exit, 'La suite Parametrage doit rester verte sur le serveur MySQL prive ; aucun payload sensible de diagnostic expose.');
-        $this->assertSame(257, $result['tests'] ?? null);
+        $listPath = $network->directory.'/parametrage-tests.xml';
+        $discovery = new Process([PHP_BINARY, 'vendor/bin/phpunit', '-c', 'phpunit.parametrage.xml', '--list-tests-xml', $listPath], $network->root, $environment);
+        $this->assertSame(0, $discovery->run(), 'Inventaire de la suite Paramétrage indisponible.');
+        $inventory = new \DOMDocument;
+        $this->assertTrue($inventory->load($listPath));
+        $expectedCount = $inventory->getElementsByTagName('testMethod')->length;
+        $this->assertGreaterThan(0, $expectedCount);
+        $this->assertSame($expectedCount, $result['tests'] ?? null);
         $this->assertTrue($network->logsContainNoSecrets());
     }
 }

@@ -10,6 +10,7 @@ use App\Models\Permission;
 use App\Models\Role;
 use App\Models\TypeSortie;
 use App\Models\User;
+use App\Services\DemandeReferences;
 use App\Services\ParametrageSecurity;
 use App\Services\PasswordService;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
@@ -30,7 +31,7 @@ class TestDataSeeder extends Seeder
      */
     public function run(PasswordService $passwordService): void
     {
-        $this->ensureTestDatabaseIsConfigured();
+        self::assertTestDatabase();
 
         DB::transaction(function () use ($passwordService): void {
             app(ParametrageSecurity::class)->lock();
@@ -45,12 +46,13 @@ class TestDataSeeder extends Seeder
 
             $users = $this->seedUsers($directions, $passwordService);
             $this->callWith(QaRoleAccountsSeeder::class, ['directionId' => $directions['dsi']->id]);
+            $this->call(QaCourseResourcesSeeder::class);
             $this->seedDemandes($directions, $users);
             app(ParametrageSecurity::class)->assertAdministratorRemains();
         });
     }
 
-    private function ensureTestDatabaseIsConfigured(): void
+    public static function assertTestDatabase(): void
     {
         $databaseName = config('database.connections.mysql.database');
         $connection = DB::connection();
@@ -265,6 +267,7 @@ class TestDataSeeder extends Seeder
             );
 
             $this->seedChildren($demande, $definition);
+            DemandeReferences::recordUsage(DemandeReferences::selection($demande));
             $this->seedHistoriques($demande, $definition['historiques'], $users);
 
             if (isset($definition['modification'])) {
@@ -439,7 +442,7 @@ class TestDataSeeder extends Seeder
      */
     private function seedModification(Demande $demande, User $demandeur, Direction $direction, array $modification): void
     {
-        $demande->modification()->updateOrCreate([], [
+        $copy = $demande->modification()->updateOrCreate([], [
             'demandeur_id' => $demandeur->id,
             'direction_id' => $direction->id,
             'type_sortie_id' => $demande->type_sortie_id,
@@ -458,6 +461,7 @@ class TestDataSeeder extends Seeder
             'objets' => $modification['objets'],
             'submitted_at' => null,
         ]);
+        DemandeReferences::recordUsage(DemandeReferences::selection($copy));
     }
 
     private function synchronizeReferenceSequence(Carbon $referenceDate): void

@@ -10,6 +10,7 @@ use App\Http\Requests\StartCourseRequest;
 use App\Http\Requests\StoreCourseRequest;
 use App\Http\Requests\UpdateCoursePreparationRequest;
 use App\Http\Resources\CourseResource;
+use App\Http\Resources\TreatmentDemandeDetailResource;
 use App\Http\Resources\TreatmentDemandeResource;
 use App\Models\Chauffeur;
 use App\Models\Course;
@@ -35,7 +36,7 @@ class CoursePreparationService
     {
         $query = Demande::query()
             ->where('statut', Demande::STATUT_EN_ATTENTE)
-            ->with(['direction:id,nom', 'service:id,nom,code'])
+            ->with(['direction:id,nom', 'service:id,nom,code', 'rattachementDirection:id,nom,code'])
             ->withCount(['employes', 'objets'])
             ->orderBy('date_depart')->orderBy('heure_depart')->orderBy('id');
         $data = $request->validated();
@@ -51,6 +52,25 @@ class CoursePreparationService
         $page = $query->paginate($data['per_page'] ?? 20, ['*'], 'page', $data['page'] ?? 1);
 
         return response()->json(['message' => 'Demandes en attente récupérées.', 'data' => TreatmentDemandeResource::collection($page->getCollection())->resolve($request), 'meta' => $this->meta($page)]);
+    }
+
+    public function showPendingDemande(Request $request, int $id): JsonResponse
+    {
+        $demande = Demande::query()->where('statut', Demande::STATUT_EN_ATTENTE)
+            ->with([
+                'adresseDepart:id,adresse', 'adresseRetour:id,adresse',
+                'destinations:id,demande_id,ordre,entite_geographique_id', 'destinations.entiteGeographique:id,adresse',
+                'employes:id,demande_id,nom,prenom', 'objets:id,demande_id,designation,quantite',
+            ])
+            ->find($id, ['id', 'reference', 'statut', 'date_depart', 'heure_depart', 'heure_retour', 'adresse_depart_id', 'adresse_retour_id']);
+        if ($demande === null) {
+            $this->fail(404, 'DEMANDE_NOT_FOUND', 'Demande en attente introuvable.');
+        }
+
+        return response()->json([
+            'message' => 'Détail de planification récupéré.',
+            'data' => (new TreatmentDemandeDetailResource($demande))->resolve($request),
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     public function listCourses(IndexCourseRequest $request): JsonResponse

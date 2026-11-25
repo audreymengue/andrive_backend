@@ -73,13 +73,29 @@ frontend n'est nécessaire pour tester cette API.
    une modification et un profil chauffeur QA. Aucune valeur métier de type de
    sortie n'est préinstallée.
 
-8. Exécuter toute la suite de tests :
+   `OfficialOrganisationSeeder` charge ensuite les directions et services officiels.
+   Pour le formulaire de demande, `GET /api/directions` fournit aussi la liste
+   `rattachements` de chaque direction. La Direction générale propose Conseillers,
+   Chargés d’Étude, Coordonnateur, Cabinet et Autre. Si un choix est fait, envoyer
+   son `id` dans `rattachement_direction_id`. Une demande accepte aussi la direction
+   seule. Les services des autres directions continuent d’utiliser `service_id`.
+
+8. Vérifier le backend avec les profils de test du dépôt.
 
    ```powershell
    php vendor/bin/phpunit
    ```
 
-   Les tests utilisent SQLite en mémoire ; ils ne réinitialisent pas MySQL.
+   Cette commande lance les tests généraux sur SQLite en mémoire. Les commandes
+   suivantes complètent la vérification sur MySQL. Les deux premières utilisent
+   la base locale `aninf_test` et ses migrations à jour. La suite réseau crée sa
+   propre instance MySQL locale et y rejoue aussi la suite Paramétrage.
+
+   ```powershell
+   php vendor/bin/phpunit -c phpunit.parametrage.xml
+   php vendor/bin/phpunit -c phpunit.parametrage.xml tests/Feature/TreatmentCourseApiTest.php tests/Feature/TransportApiTest.php
+   php vendor/bin/phpunit -c phpunit.network.xml
+   ```
 
 9. Lancer le serveur de développement :
 
@@ -138,6 +154,77 @@ destinations ordonnées, les objets facultatifs, les historiques et une
 modification en cours. Les références sont au format `JJ-MM-AA-XXXX` ; obtenir
 les identifiants réellement présents via l'API avant de construire un payload.
 
+## Notifications push pour Flutter et Angular
+
+L’activation du push est reportée pour cette livraison. Conserver `PUSH_ENABLED=false`.
+Les clients peuvent intégrer dès maintenant la boîte personnelle via
+`GET /api/notifications` et son compteur via `GET /api/notifications/unread-count`.
+La procédure ci-dessous servira à la recette sur appareil lorsque Firebase sera configuré.
+
+Le push reprend les événements de la boîte personnelle. Le demandeur reçoit
+les avis de validation de sa demande, de départ et de fin de course. Le
+chauffeur reçoit l’avis d’affectation. Le contenu visible sur écran verrouillé
+est générique. `data.notification_id` permet au client de retrouver la
+notification dans `GET /api/notifications` après authentification. La réception
+du push laisse la notification non lue.
+
+1. Le client demande la permission d’affichage, obtient le jeton FCM du SDK
+   et crée un UUID aléatoire conservé pour cette installation.
+2. Après connexion, puis à chaque renouvellement du jeton Firebase ou de la
+   session Sanctum, il envoie `PUT /api/me/push-devices/{installation_id}`
+   avec le Bearer Sanctum et un corps JSON contenant `plateforme`
+   (`android`, `ios` ou `web`) et `token` (jeton FCM).
+3. Pour retirer le consentement, il appelle
+   `DELETE /api/me/push-devices/{installation_id}`. La révocation de la
+   session par le backend retire aussi son inscription. Après un changement
+   de compte, ouvrir les détails uniquement pour la session en cours.
+
+Pour activer les envois, configurer `PUSH_ENABLED=true` et
+`FIREBASE_CREDENTIALS` avec le chemin absolu d’un fichier de compte de service
+privé autorisé à envoyer des messages via FCM HTTP v1. Le fichier de clé reste
+sur le serveur hors de Git et du répertoire public. Appliquer les migrations
+puis démarrer un worker supervisé avec `php artisan queue:work database`.
+Après modification de la configuration mise en cache, la régénérer et
+redémarrer les workers. Le push est désactivé par défaut.
+
+Sur iOS, configurer APNs dans Firebase. Sur le Web, prévoir HTTPS, les clés
+VAPID et le service worker de messagerie. Les clients doivent traiter les
+notifications au premier plan et à l’ouverture depuis l’arrière-plan selon
+leur SDK. [Guide Flutter](https://firebase.google.com/docs/cloud-messaging/flutter/get-started)
+et [guide Web](https://firebase.google.com/docs/cloud-messaging/web/get-started).
+
+## Charger la liste officielle du pool et du parc
+
+Sur un poste autorisé, placer le fichier de données institutionnelles
+`parc-officiel.json` dans `storage/app/private/`. Ce fichier contient les
+identités et les téléphones professionnels. Il se transmet par le canal
+interne de l’agence et est exclu de Git. Sur un nouveau poste, le seeding
+standard charge le parc officiel lorsque ce fichier est présent.
+
+Sur une base de développement déjà initialisée, vérifier que la première
+commande affiche `aninf_test`, puis appliquer les migrations et le seeder dédié.
+
+```powershell
+php artisan config:show database.connections.mysql.database
+php artisan migrate --database=mysql
+php artisan db:seed --class=OfficialFleetSeeder --database=mysql
+```
+
+Le fichier comporte deux listes. Chaque chauffeur est identifié par une
+`reference` technique stable, indépendante de son compte. Les autres champs
+sont `nom_complet`, `telephone` et `mention_pool`. Conserver la même référence
+si l’orthographe du nom est corrigée. Chaque véhicule est identifié par son
+`immatriculation` et possède `marque`, `modele`, `nombre_places` et `statut`.
+Le nombre de places du document inclut le conducteur. L’API expose la capacité
+passagers dans `places_utiles` (5 places au total donnent 4 places utiles).
+Les véhicules signalés hors service sont importés avec le statut `INACTIF`.
+
+Les profils chauffeurs du document sont consultables dans
+`GET /api/parametrage/chauffeurs`. Une personne habilitée peut ensuite lier
+chaque profil au compte vérifié de son titulaire pour permettre l’affectation
+aux courses. Les mentions du pool sont descriptives. Les utilisateurs et leurs
+habilitations sont gérés séparément.
+
 ## Réexécuter l'initialisation
 
 `php artisan migrate --seed` est la commande standard, également sur une base
@@ -159,9 +246,18 @@ une base contenant des données à conserver. La protection de `TestDataSeeder`
 refuse une base active différente de `aninf_test`, mais intervient au moment
 du seeding et ne protège pas contre une commande `migrate:fresh` mal ciblée.
 
-Sur une autre base standard, `DatabaseSeeder` appelle uniquement les seeders
-génériques Permission, Role et AdminUser ; aucune donnée de démonstration
-n'est insérée.
+Pour appliquer uniquement la mise à jour du référentiel officiel sur une base
+déjà initialisée, vérifier la base configurée puis exécuter les migrations et le
+seeder institutionnel.
+
+```powershell
+php artisan config:show database.connections.mysql.database
+php artisan migrate
+php artisan db:seed --class=OfficialOrganisationSeeder
+```
+
+Sur une autre base standard, `DatabaseSeeder` charge les permissions, les rôles,
+le référentiel institutionnel et l’administrateur initial.
 
 <p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
 

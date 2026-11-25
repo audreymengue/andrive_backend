@@ -75,7 +75,9 @@ paths:
         Compte ACTIF et must_change_password=false, sauf exceptions Auth. Droits effectifs des seuls rôles actifs ; contrôle
         serveur de portée.
 
-        Liste sélectionnable uniquement : statut ACTIF ; pas d’archives ni d’administration.'
+        Liste sélectionnable uniquement : statut ACTIF ; pas d’archives ni d’administration.
+
+        Chaque direction expose ses rattachements hors service dans rattachements. Une liste vide indique que la direction ne possède aucun de ces rattachements.'
       security:
       - bearerAuth: []
       parameters:
@@ -102,13 +104,13 @@ paths:
           maxLength: 255
       responses:
         '200':
-          description: Succès cible, nécessite développement backend.
+          description: Liste des directions actives et de leurs rattachements.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ParamDirectionListResponse'
+                $ref: '#/components/schemas/OperationalDirectionListResponse'
               example:
-                message: Opération effectuée avec succès (exemple cible).
+                message: Liste récupérée avec succès.
                 data: []
                 meta:
                   current_page: 1
@@ -2754,6 +2756,7 @@ paths:
       - Demandes
       summary: Soumettre une demande
       operationId: submitDemande
+      description: La soumission utilise le rattachement enregistré. La direction seule suffit pour le rattachement organisationnel.
       parameters:
       - $ref: '#/components/parameters/DemandeId'
       responses:
@@ -2955,6 +2958,7 @@ paths:
       - Demandes
       summary: Soumettre une modification de demande
       operationId: submitDemandeModification
+      description: Soumet la modification enregistrée pour revalidation. La réponse décrit la demande courante, y compris son rattachement courant.
       parameters:
       - $ref: '#/components/parameters/DemandeId'
       responses:
@@ -5616,6 +5620,47 @@ paths:
           $ref: '#/components/responses/Param403'
         '422':
           $ref: '#/components/responses/Param422'
+  /api/traitement/demandes/{id}:
+    get:
+      tags:
+      - Traitement / Affectation
+      summary: Consulter les éléments d’une demande pour planifier les arrêts
+      operationId: treatmentGetPendingDemande
+      description: Après sélection dans la liste des demandes EN_ATTENTE, utiliser employes[].id et objets[].id comme demande_employe_id
+        et demande_objet_id dans plan.arrets. Les adresses permettent à la DAG de saisir le lieu de chaque arrêt.
+      security:
+      - bearerAuth: []
+      x-implementation-status: implemented
+      x-contract-status: implemented
+      x-permissions:
+      - read_demande_traitement
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      responses:
+        '200':
+          description: Données de planification de la demande.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TreatmentDemandeDetailResponse'
+        '401':
+          $ref: '#/components/responses/Param401'
+        '403':
+          $ref: '#/components/responses/Param403'
+        '404':
+          description: Demande absente ou dont le statut ne permet plus la planification.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParamError'
+              example:
+                message: Demande en attente introuvable.
+                code: DEMANDE_NOT_FOUND
   /api/parametrage/vehicules:
     get:
       tags:
@@ -5890,9 +5935,10 @@ paths:
       x-permissions:
       - read_driver
       x-business-rules:
-      - Le nom et le prénom proviennent du compte User lié ; aucun critère de permis ou justificatif n'est imposé.
+      - Le profil peut renseigner un nom complet et une mention du pool sans compte. Le nom et le prénom du compte lié restent ceux de l’utilisateur. La mention est descriptive et ne donne aucun droit.
       - Un compte inactif ou absent rend le profil non sélectionnable, sans supprimer son historique.
       x-search-fields:
+      - nom_complet
       - utilisateur.nom
       - utilisateur.prenom
       x-blocking-decisions:
@@ -6847,6 +6893,115 @@ paths:
           $ref: '#/components/responses/Param422'
         '503':
           $ref: '#/components/responses/Param503'
+  /api/me/push-devices/{installation_id}:
+    put:
+      tags:
+      - Notifications
+      security:
+      - bearerAuth: []
+      x-implementation-status: implemented
+      x-contract-status: implemented
+      x-permissions: []
+      x-authorized-roles:
+      - Utilisateur authentifié
+      parameters:
+      - name: installation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      operationId: registerMyPushDevice
+      summary: Activer ou renouveler le push sur cette installation
+      description: Associe le jeton Firebase Cloud Messaging à la session Sanctum courante. Réutiliser le même UUID lors
+        d’un renouvellement FCM. Sur une installation déjà liée à un autre compte, fournir le jeton FCM courant ou révoquer
+        d’abord l’ancienne session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - plateforme
+              - token
+              properties:
+                plateforme:
+                  type: string
+                  enum:
+                  - android
+                  - ios
+                  - web
+                token:
+                  type: string
+                  minLength: 1
+                  maxLength: 4096
+                  pattern: ^[!-~]+$
+                  writeOnly: true
+                  description: Jeton d’inscription émis par le SDK Firebase sur l’installation.
+      responses:
+        '200':
+          description: Installation enregistrée pour la session courante.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                - message
+                properties:
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Param401'
+        '403':
+          $ref: '#/components/responses/Param403'
+        '409':
+          description: Inscription incompatible avec le jeton ou l’installation déjà enregistrée.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParamError'
+              example:
+                message: Cette installation ou ce jeton est déjà associé.
+                code: PUSH_DEVICE_CONFLICT
+        '422':
+          $ref: '#/components/responses/Param422'
+        '503':
+          $ref: '#/components/responses/Param503'
+    delete:
+      tags:
+      - Notifications
+      security:
+      - bearerAuth: []
+      x-implementation-status: implemented
+      x-contract-status: implemented
+      x-permissions: []
+      x-authorized-roles:
+      - Utilisateur authentifié
+      parameters:
+      - name: installation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      operationId: removeMyPushDevice
+      summary: Désactiver le push sur une installation
+      description: Supprime l’inscription de l’utilisateur connecté. Un nouveau retrait renvoie aussi 204. La révocation
+        du jeton Sanctum supprime automatiquement les inscriptions qui en dépendent.
+      responses:
+        '204':
+          description: Retrait pris en compte. La réponse est vide.
+        '401':
+          $ref: '#/components/responses/Param401'
+        '403':
+          $ref: '#/components/responses/Param403'
+        '422':
+          $ref: '#/components/responses/Param422'
+        '503':
+          $ref: '#/components/responses/Param503'
   /api/notifications:
     get:
       tags:
@@ -7304,6 +7459,116 @@ components:
             $ref: '#/components/schemas/Course'
         meta:
           $ref: '#/components/schemas/ParamMeta'
+    TreatmentPlanLocation:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - adresse
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        adresse:
+          type: string
+      nullable: true
+    TreatmentDemandeDetailResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - message
+      - data
+      properties:
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+          - id
+          - reference
+          - statut
+          - date_depart
+          - heure_depart
+          - heure_retour
+          - adresse_depart
+          - adresse_retour
+          - destinations
+          - employes
+          - objets
+          properties:
+            id:
+              type: integer
+              minimum: 1
+            reference:
+              type: string
+            statut:
+              type: string
+              enum:
+              - EN_ATTENTE
+            date_depart:
+              type: string
+              format: date
+            heure_depart:
+              type: string
+              pattern: ^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$
+            heure_retour:
+              type: string
+              pattern: ^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$
+              nullable: true
+            adresse_depart:
+              $ref: '#/components/schemas/TreatmentPlanLocation'
+            adresse_retour:
+              $ref: '#/components/schemas/TreatmentPlanLocation'
+            destinations:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required:
+                - ordre
+                - entite_geographique
+                properties:
+                  ordre:
+                    type: integer
+                    minimum: 1
+                  entite_geographique:
+                    $ref: '#/components/schemas/TreatmentPlanLocation'
+            employes:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required:
+                - id
+                - nom
+                - prenom
+                properties:
+                  id:
+                    type: integer
+                    minimum: 1
+                  nom:
+                    type: string
+                  prenom:
+                    type: string
+            objets:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required:
+                - id
+                - designation
+                - quantite
+                properties:
+                  id:
+                    type: integer
+                    minimum: 1
+                  designation:
+                    type: string
+                  quantite:
+                    type: integer
+                    nullable: true
     TreatmentDemandeSummary:
       type: object
       additionalProperties: false
@@ -7312,6 +7577,7 @@ components:
       - reference
       - statut
       - direction
+      - rattachement_direction
       - service
       - date_depart
       - heure_depart
@@ -7340,6 +7606,8 @@ components:
               minimum: 1
             nom:
               type: string
+        rattachement_direction:
+          $ref: '#/components/schemas/DemandeRattachementDirection'
         service:
           type: object
           nullable: true
@@ -8012,6 +8280,12 @@ components:
           example: Dossiers à déposer
     CreateDemandeRequest:
       type: object
+      not:
+        type: object
+        required: [service_id, rattachement_direction_id]
+        properties:
+          service_id: {type: integer}
+          rattachement_direction_id: {type: integer}
       required:
       - direction_id
       - type_sortie_id
@@ -8026,6 +8300,16 @@ components:
           type: integer
           minimum: 1
           example: 2
+        service_id:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Service actif de la direction choisie. Facultatif et exclusif de rattachement_direction_id.
+        rattachement_direction_id:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Identifiant renvoyé dans rattachements pour la direction choisie par GET /api/directions. Laisser vide pour sélectionner uniquement la direction. Une référence absente, associée à une autre direction ou combinée avec un service non nul entraîne une réponse 422.
         type_sortie_id:
           type: integer
           minimum: 1
@@ -8128,6 +8412,7 @@ components:
       - reference
       - demandeur
       - direction
+      - rattachement_direction
       - date_depart
       - heure_depart
       - motif
@@ -8147,6 +8432,8 @@ components:
           $ref: '#/components/schemas/DemandeurSummary'
         direction:
           $ref: '#/components/schemas/DirectionSummary'
+        rattachement_direction:
+          $ref: '#/components/schemas/DemandeRattachementDirection'
         service:
           type: object
           nullable: true
@@ -8886,6 +9173,82 @@ components:
         description: null
         statut: ACTIF
         lock_version: 1
+    OperationalDirection:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - nom
+      - code
+      - description
+      - statut
+      - lock_version
+      - rattachements
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        nom:
+          type: string
+          minLength: 1
+          maxLength: 255
+        code:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+        rattachements:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, code, nom]
+            properties:
+              id:
+                type: integer
+                format: int64
+                minimum: 1
+              code:
+                type: string
+                example: CABINET
+              nom:
+                type: string
+                example: Cabinet
+        statut:
+          type: string
+          enum:
+          - ACTIF
+        lock_version:
+          type: integer
+          minimum: 0
+          example: 1
+      example:
+        id: 2
+        nom: Direction fictive pour intégration
+        code: DIR_EXEMPLE
+        description: null
+        statut: ACTIF
+        lock_version: 1
+        rattachements: []
+    DemandeRattachementDirection:
+      type: object
+      nullable: true
+      additionalProperties: false
+      required: [id, code, nom]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        code:
+          type: string
+          example: CABINET
+        nom:
+          type: string
+          example: Cabinet
     ParamService:
       type: object
       additionalProperties: false
@@ -9129,6 +9492,16 @@ components:
           minimum: 1
           nullable: true
           description: Compte User associé ; null tant que le profil n'est pas lié.
+        nom_complet:
+          type: string
+          maxLength: 255
+          nullable: true
+          description: Nom complet du profil chauffeur, indépendant de son éventuel compte utilisateur.
+        mention_pool:
+          type: string
+          maxLength: 255
+          nullable: true
+          description: Indication descriptive du pool. Elle ne modifie ni les habilitations ni les règles d’affectation.
         utilisateur:
           type: object
           nullable: true
@@ -9168,6 +9541,16 @@ components:
       type: object
       additionalProperties: false
       properties:
+        nom_complet:
+          type: string
+          maxLength: 255
+          nullable: true
+          description: Nom complet du profil chauffeur, indépendant de son éventuel compte utilisateur.
+        mention_pool:
+          type: string
+          maxLength: 255
+          nullable: true
+          description: Indication descriptive du pool. Elle ne modifie ni les habilitations ni les règles d’affectation.
         telephone:
           type: string
           maxLength: 32
@@ -9182,10 +9565,21 @@ components:
           nullable: true
     ParamUpdateDriver:
       type: object
+      description: Omettre un champ conserve sa valeur. Envoyer null efface le nom complet ou la mention du pool.
       additionalProperties: false
       required:
       - version_attendue
       properties:
+        nom_complet:
+          type: string
+          maxLength: 255
+          nullable: true
+          description: Nom complet du profil chauffeur, indépendant de son éventuel compte utilisateur.
+        mention_pool:
+          type: string
+          maxLength: 255
+          nullable: true
+          description: Indication descriptive du pool. Elle ne modifie ni les habilitations ni les règles d’affectation.
         telephone:
           type: string
           maxLength: 32
@@ -9918,6 +10312,22 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ParamDirection'
+        meta:
+          $ref: '#/components/schemas/ParamMeta'
+    OperationalDirectionListResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - message
+      - data
+      - meta
+      properties:
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperationalDirection'
         meta:
           $ref: '#/components/schemas/ParamMeta'
     ParamDirectionResponse:
@@ -11079,7 +11489,9 @@ x-current-contract:
           Compte ACTIF et must_change_password=false, sauf exceptions Auth. Droits effectifs des seuls rôles actifs ; contrôle
           serveur de portée.
 
-          Liste sélectionnable uniquement : statut ACTIF ; pas d’archives ni d’administration.'
+          Liste sélectionnable uniquement : statut ACTIF ; pas d’archives ni d’administration.
+
+          Chaque direction expose ses rattachements hors service dans rattachements. Une liste vide indique que la direction ne possède aucun de ces rattachements.'
         security:
         - bearerAuth: []
         parameters:
@@ -11106,13 +11518,13 @@ x-current-contract:
             maxLength: 255
         responses:
           '200':
-            description: Succès cible, nécessite développement backend.
+            description: Liste des directions actives et de leurs rattachements.
             content:
               application/json:
                 schema:
-                  $ref: '#/components/schemas/ParamDirectionListResponse'
+                  $ref: '#/components/schemas/OperationalDirectionListResponse'
                 example:
-                  message: Opération effectuée avec succès (exemple cible).
+                  message: Liste récupérée avec succès.
                   data: []
                   meta:
                     current_page: 1
@@ -13032,6 +13444,7 @@ x-current-contract:
         - Demandes
         summary: Soumettre une demande
         operationId: submitDemande
+        description: La soumission utilise le rattachement enregistré. La direction seule suffit pour le rattachement organisationnel.
         parameters:
         - $ref: '#/components/parameters/DemandeId'
         responses:
@@ -13237,6 +13650,7 @@ x-current-contract:
         - Demandes
         summary: Soumettre une modification de demande
         operationId: submitDemandeModification
+        description: Soumet la modification enregistrée pour revalidation. La réponse décrit la demande courante, y compris son rattachement courant.
         parameters:
         - $ref: '#/components/parameters/DemandeId'
         responses:
@@ -16028,9 +16442,10 @@ x-current-contract:
         x-permissions:
         - read_driver
         x-business-rules:
-        - Le nom et le prénom proviennent du compte User lié ; aucun critère de permis ou justificatif n'est imposé.
+        - Le profil peut renseigner un nom complet et une mention du pool sans compte. Le nom et le prénom du compte lié restent ceux de l’utilisateur. La mention est descriptive et ne donne aucun droit.
         - Un compte inactif ou absent rend le profil non sélectionnable, sans supprimer son historique.
         x-search-fields:
+        - nom_complet
         - utilisateur.nom
         - utilisateur.prenom
       post:
@@ -16909,6 +17324,115 @@ x-current-contract:
             $ref: '#/components/responses/Param422'
           '503':
             $ref: '#/components/responses/Param503'
+    /api/me/push-devices/{installation_id}:
+      put:
+        tags:
+        - Notifications
+        security:
+        - bearerAuth: []
+        x-implementation-status: implemented
+        x-contract-status: implemented
+        x-permissions: []
+        x-authorized-roles:
+        - Utilisateur authentifié
+        parameters:
+        - name: installation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        operationId: registerMyPushDevice
+        summary: Activer ou renouveler le push sur cette installation
+        description: Associe le jeton Firebase Cloud Messaging à la session Sanctum courante. Réutiliser le même UUID lors
+          d’un renouvellement FCM. Sur une installation déjà liée à un autre compte, fournir le jeton FCM courant ou révoquer
+          d’abord l’ancienne session.
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                - plateforme
+                - token
+                properties:
+                  plateforme:
+                    type: string
+                    enum:
+                    - android
+                    - ios
+                    - web
+                  token:
+                    type: string
+                    minLength: 1
+                    maxLength: 4096
+                    pattern: ^[!-~]+$
+                    writeOnly: true
+                    description: Jeton d’inscription émis par le SDK Firebase sur l’installation.
+        responses:
+          '200':
+            description: Installation enregistrée pour la session courante.
+            content:
+              application/json:
+                schema:
+                  type: object
+                  additionalProperties: false
+                  required:
+                  - message
+                  properties:
+                    message:
+                      type: string
+          '401':
+            $ref: '#/components/responses/Param401'
+          '403':
+            $ref: '#/components/responses/Param403'
+          '409':
+            description: Inscription incompatible avec le jeton ou l’installation déjà enregistrée.
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ParamError'
+                example:
+                  message: Cette installation ou ce jeton est déjà associé.
+                  code: PUSH_DEVICE_CONFLICT
+          '422':
+            $ref: '#/components/responses/Param422'
+          '503':
+            $ref: '#/components/responses/Param503'
+      delete:
+        tags:
+        - Notifications
+        security:
+        - bearerAuth: []
+        x-implementation-status: implemented
+        x-contract-status: implemented
+        x-permissions: []
+        x-authorized-roles:
+        - Utilisateur authentifié
+        parameters:
+        - name: installation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        operationId: removeMyPushDevice
+        summary: Désactiver le push sur une installation
+        description: Supprime l’inscription de l’utilisateur connecté. Un nouveau retrait renvoie aussi 204. La révocation
+          du jeton Sanctum supprime automatiquement les inscriptions qui en dépendent.
+        responses:
+          '204':
+            description: Retrait pris en compte. La réponse est vide.
+          '401':
+            $ref: '#/components/responses/Param401'
+          '403':
+            $ref: '#/components/responses/Param403'
+          '422':
+            $ref: '#/components/responses/Param422'
+          '503':
+            $ref: '#/components/responses/Param503'
     /api/notifications:
       get:
         tags:
@@ -17371,6 +17895,7 @@ x-current-contract:
         - reference
         - statut
         - direction
+        - rattachement_direction
         - service
         - date_depart
         - heure_depart
@@ -17399,6 +17924,8 @@ x-current-contract:
                 minimum: 1
               nom:
                 type: string
+          rattachement_direction:
+            $ref: '#/components/schemas/DemandeRattachementDirection'
           service:
             type: object
             nullable: true
@@ -18071,6 +18598,12 @@ x-current-contract:
             example: Dossiers à déposer
       CreateDemandeRequest:
         type: object
+        not:
+          type: object
+          required: [service_id, rattachement_direction_id]
+          properties:
+            service_id: {type: integer}
+            rattachement_direction_id: {type: integer}
         required:
         - direction_id
         - type_sortie_id
@@ -18085,6 +18618,16 @@ x-current-contract:
             type: integer
             minimum: 1
             example: 2
+          service_id:
+            type: integer
+            minimum: 1
+            nullable: true
+            description: Service actif de la direction choisie. Facultatif et exclusif de rattachement_direction_id.
+          rattachement_direction_id:
+            type: integer
+            minimum: 1
+            nullable: true
+            description: Identifiant renvoyé dans rattachements pour la direction choisie par GET /api/directions. Laisser vide pour sélectionner uniquement la direction. Une référence absente, associée à une autre direction ou combinée avec un service non nul entraîne une réponse 422.
           type_sortie_id:
             type: integer
             minimum: 1
@@ -18187,6 +18730,7 @@ x-current-contract:
         - reference
         - demandeur
         - direction
+        - rattachement_direction
         - date_depart
         - heure_depart
         - motif
@@ -18206,6 +18750,8 @@ x-current-contract:
             $ref: '#/components/schemas/DemandeurSummary'
           direction:
             $ref: '#/components/schemas/DirectionSummary'
+          rattachement_direction:
+            $ref: '#/components/schemas/DemandeRattachementDirection'
           service:
             type: object
             nullable: true
@@ -18950,6 +19496,82 @@ x-current-contract:
           description: null
           statut: ACTIF
           lock_version: 1
+      OperationalDirection:
+        type: object
+        additionalProperties: false
+        required:
+        - id
+        - nom
+        - code
+        - description
+        - statut
+        - lock_version
+        - rattachements
+        properties:
+          id:
+            type: integer
+            format: int64
+            minimum: 1
+          nom:
+            type: string
+            minLength: 1
+            maxLength: 255
+          code:
+            type: string
+            minLength: 1
+            maxLength: 255
+          description:
+            type: string
+            nullable: true
+          rattachements:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [id, code, nom]
+              properties:
+                id:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                code:
+                  type: string
+                  example: CABINET
+                nom:
+                  type: string
+                  example: Cabinet
+          statut:
+            type: string
+            enum:
+            - ACTIF
+          lock_version:
+            type: integer
+            minimum: 0
+            example: 1
+        example:
+          id: 2
+          nom: Direction fictive pour intégration
+          code: DIR_EXEMPLE
+          description: null
+          statut: ACTIF
+          lock_version: 1
+          rattachements: []
+      DemandeRattachementDirection:
+        type: object
+        nullable: true
+        additionalProperties: false
+        required: [id, code, nom]
+        properties:
+          id:
+            type: integer
+            format: int64
+            minimum: 1
+          code:
+            type: string
+            example: CABINET
+          nom:
+            type: string
+            example: Cabinet
       ParamService:
         type: object
         additionalProperties: false
@@ -19193,6 +19815,16 @@ x-current-contract:
             minimum: 1
             nullable: true
             description: Compte User associé ; null tant que le profil n'est pas lié.
+          nom_complet:
+            type: string
+            maxLength: 255
+            nullable: true
+            description: Nom complet du profil chauffeur, indépendant de son éventuel compte utilisateur.
+          mention_pool:
+            type: string
+            maxLength: 255
+            nullable: true
+            description: Indication descriptive du pool. Elle ne modifie ni les habilitations ni les règles d’affectation.
           utilisateur:
             type: object
             nullable: true
@@ -19232,6 +19864,16 @@ x-current-contract:
         type: object
         additionalProperties: false
         properties:
+          nom_complet:
+            type: string
+            maxLength: 255
+            nullable: true
+            description: Nom complet du profil chauffeur, indépendant de son éventuel compte utilisateur.
+          mention_pool:
+            type: string
+            maxLength: 255
+            nullable: true
+            description: Indication descriptive du pool. Elle ne modifie ni les habilitations ni les règles d’affectation.
           telephone:
             type: string
             maxLength: 32
@@ -19246,10 +19888,21 @@ x-current-contract:
             nullable: true
       ParamUpdateDriver:
         type: object
+        description: Omettre un champ conserve sa valeur. Envoyer null efface le nom complet ou la mention du pool.
         additionalProperties: false
         required:
         - version_attendue
         properties:
+          nom_complet:
+            type: string
+            maxLength: 255
+            nullable: true
+            description: Nom complet du profil chauffeur, indépendant de son éventuel compte utilisateur.
+          mention_pool:
+            type: string
+            maxLength: 255
+            nullable: true
+            description: Indication descriptive du pool. Elle ne modifie ni les habilitations ni les règles d’affectation.
           telephone:
             type: string
             maxLength: 32
@@ -19982,6 +20635,22 @@ x-current-contract:
             type: array
             items:
               $ref: '#/components/schemas/ParamDirection'
+          meta:
+            $ref: '#/components/schemas/ParamMeta'
+      OperationalDirectionListResponse:
+        type: object
+        additionalProperties: false
+        required:
+        - message
+        - data
+        - meta
+        properties:
+          message:
+            type: string
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/OperationalDirection'
           meta:
             $ref: '#/components/schemas/ParamMeta'
       ParamDirectionResponse:
